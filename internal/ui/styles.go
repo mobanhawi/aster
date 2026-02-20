@@ -4,7 +4,6 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	// Color palette
-	colorBg     = lipgloss.AdaptiveColor{Dark: "#0f0f1a", Light: "#f5f5ff"}
 	colorAccent = lipgloss.Color("#9b59b6")
 	colorTeal   = lipgloss.Color("#1abc9c")
 	colorDim    = lipgloss.Color("#444466")

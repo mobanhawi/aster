@@ -29,7 +29,7 @@ func (m Model) View() string {
 
 // viewScanning renders the scanning progress screen.
 func (m Model) viewScanning() string {
-	header := styleHeader.Width(m.width).Render("  DiskView")
+	header := styleHeader.Width(m.width).Render("  aster")
 	msg := styleScanning.Render(fmt.Sprintf("\n  %s Scanning %s…\n", m.sp.View(), m.rootPath))
 	hint := styleFooter.Width(m.width).Render(" Press q to quit")
 	return lipgloss.JoinVertical(lipgloss.Left, header, msg, hint)
@@ -37,7 +37,7 @@ func (m Model) viewScanning() string {
 
 // viewError renders an error screen.
 func (m Model) viewError() string {
-	header := styleHeader.Width(m.width).Render("  DiskView — Error")
+	header := styleHeader.Width(m.width).Render("  aster — Error")
 	msg := styleError.Render(fmt.Sprintf("\n  ✗ %v\n", m.scanErr))
 	hint := styleFooter.Width(m.width).Render(" Press q to quit")
 	return lipgloss.JoinVertical(lipgloss.Left, header, msg, hint)
@@ -48,7 +48,7 @@ func (m Model) viewBrowse() string {
 	lines := make([]string, 0, m.height)
 
 	// ── Header ──────────────────────────────────────────────────────────────
-	lines = append(lines, styleHeader.Width(m.width).Render("  DiskView"))
+	lines = append(lines, styleHeader.Width(m.width).Render("  aster"))
 
 	// ── Breadcrumb ───────────────────────────────────────────────────────────
 	lines = append(lines, styleBreadcrumb.Width(m.width).Render(m.breadcrumb()))

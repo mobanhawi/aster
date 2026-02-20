@@ -173,7 +173,7 @@ func TestScan(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var root string
 			if tc.layout == nil {
-				root = "/tmp/diskview_does_not_exist_xyz"
+				root = "/tmp/aster_does_not_exist_xyz"
 			} else {
 				root = makeTestDir(t, tc.layout)
 			}
