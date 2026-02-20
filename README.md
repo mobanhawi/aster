@@ -2,7 +2,11 @@
 
 A terminal disk usage analyzer for macOS. Navigate your filesystem, identify large directories, and clean up — all from the terminal.
 
-![aster TUI](screenshot.png)
+[![CI](https://github.com/mobanhawi/aster/actions/workflows/go.yml/badge.svg)](https://github.com/mobanhawi/aster/actions/workflows/go.yml)
+[![Release](https://github.com/mobanhawi/aster/actions/workflows/release.yml/badge.svg)](https://github.com/mobanhawi/aster/actions/workflows/release.yml)
+[![codecov](https://codecov.io/gh/mobanhawi/aster/branch/main/graph/badge.svg)](https://codecov.io/gh/mobanhawi/aster)
+
+![aster TUI](assets/screenshot.png)
 
 ## Install
 
@@ -15,6 +19,8 @@ brew install aster
 
 ### Build from source
 
+```bash
+git clone https://github.com/mobanhawi/aster
 cd aster
 go build -o aster .
 ```
