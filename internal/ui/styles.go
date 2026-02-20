@@ -31,71 +31,71 @@ var (
 			Background(colorAccent).
 			Padding(0, 2)
 
-	// Style: breadcrumb path
+	// Style: breadcrumb path.
 	styleBreadcrumb = lipgloss.NewStyle().
 			Foreground(colorTeal).
 			Italic(true).
 			Padding(0, 1)
 
-	// Style: selected row highlight
+	// Style: selected row highlight.
 	styleSelected = lipgloss.NewStyle().
 			Background(lipgloss.Color("#2a1a4a")).
 			Bold(true)
 
-	// Style: normal row
+	// Style: normal row.
 	styleRow = lipgloss.NewStyle().
 			Foreground(colorWhite)
 
-	// Style: directory indicator
+	// Style: directory indicator.
 	styleDir = lipgloss.NewStyle().
 			Foreground(colorAccent).
 			Bold(true)
 
-	// Style: file indicator
+	// Style: file indicator.
 	styleFile = lipgloss.NewStyle().
 			Foreground(colorGray)
 
-	// Style: size label (right-aligned)
+	// Style: size label (right-aligned).
 	styleSize = lipgloss.NewStyle().
 			Foreground(colorTeal).
 			Width(9).
 			Align(lipgloss.Right)
 
-	// Style: size percentage
+	// Style: size percentage.
 	stylePct = lipgloss.NewStyle().
 			Foreground(colorGray).
 			Width(5).
 			Align(lipgloss.Right)
 
-	// Style: footer bar
+	// Style: footer bar.
 	styleFooter = lipgloss.NewStyle().
 			Foreground(colorGray).
 			Background(lipgloss.Color("#111122")).
 			Padding(0, 1)
 
-	// Style: key hint
+	// Style: key hint.
 	styleKey = lipgloss.NewStyle().
 			Foreground(colorAccent).
 			Bold(true)
 
-	// Style: scanning status
+	// Style: scanning status.
 	styleScanning = lipgloss.NewStyle().
 			Foreground(colorYellow).
 			Bold(true)
 
-	// Style: error
+	// Style: error.
 	styleError = lipgloss.NewStyle().
 			Foreground(colorRed).
 			Bold(true)
 
-	// Style: confirm prompt
+	// Style: confirm prompt.
 	styleConfirm = lipgloss.NewStyle().
 			Foreground(colorRed).
 			Bold(true).
 			Background(lipgloss.Color("#2a0000")).
 			Padding(0, 2)
 
-	// Style: info panel divider
+	// Style: info panel divider.
 	styleDivider = lipgloss.NewStyle().
 			Foreground(colorDim)
 )

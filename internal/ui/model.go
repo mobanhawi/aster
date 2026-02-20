@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,11 +20,6 @@ const (
 type scanDoneMsg struct {
 	root *Node
 	err  error
-}
-
-// progressTickMsg is a periodic tick during scanning.
-type progressTickMsg struct {
-	bytes int64
 }
 
 // Node is a local alias for the scanner node.
@@ -52,7 +46,6 @@ type Model struct {
 	// Scan state
 	state    AppState
 	rootPath string
-	progress int64 // bytes counted during scan
 	scanErr  error
 
 	// UI dimensions
@@ -119,13 +112,6 @@ func sortTree(n *Node, mode SortMode) {
 			sortTree(child, mode)
 		}
 	}
-}
-
-// tickCmd sends periodic progress updates.
-func tickCmd() tea.Cmd {
-	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
-		return progressTickMsg{}
-	})
 }
 
 // currentDir returns the directory currently being browsed.
