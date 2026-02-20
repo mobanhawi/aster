@@ -18,7 +18,7 @@ jobs:
           go-version: stable
 
       - name: Build
-        run: go build -v -o aster ./...
+        run: go build -v -o aster .
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
