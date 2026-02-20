@@ -38,10 +38,6 @@ changelog:
 
 homebrew_casks:
   - name: aster
-    tap:
-      owner: mobanhawi
-      name: homebrew-aster
-      branch: main
     commit_author:
       name: mobanhawi
       email: mobanhawi@users.noreply.github.com
