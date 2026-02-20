@@ -45,6 +45,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// #nosec G703 -- This is a CLI. Exploring untrusted paths directly from input is intended.
 	if _, err := os.Stat(cleanRootAbs); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

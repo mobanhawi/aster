@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -130,9 +131,15 @@ func (m Model) handleKeyBrowsingActions(key string) (tea.Model, tea.Cmd) {
 	case "s":
 		m.handleSortToggle()
 	case "o":
-		_ = m.handleOpen()
+		if err := m.handleOpen(); err != nil {
+			m.scanErr = err
+			m.state = StateError
+		}
 	case "r":
-		_ = m.handleReveal()
+		if err := m.handleReveal(); err != nil {
+			m.scanErr = err
+			m.state = StateError
+		}
 	case "d":
 		sel := m.selected()
 		if sel != nil {
@@ -198,17 +205,23 @@ const (
 func trashItem(path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	script := fmt.Sprintf(`tell application "Finder" to delete POSIX file %q`, path)
+
+	cleanedPath := filepath.Clean(path)
+	script := fmt.Sprintf(`tell application "Finder" to delete POSIX file %q`, cleanedPath)
+
+	// #nosec G204 -- The application intentionally constructs commands based on user input, and we've verified sanitization
 	cmd := exec.CommandContext(ctx, cmdOsascript, "-e", script)
 	return cmd.Run()
 }
 
 // openPath opens a file or directory with the default macOS app.
 func openPath(ctx context.Context, path string) error {
-	return exec.CommandContext(ctx, cmdOpen, path).Start()
+	// #nosec G204 -- The application needs to open dynamic files
+	return exec.CommandContext(ctx, cmdOpen, filepath.Clean(path)).Start()
 }
 
 // revealPath reveals an item in Finder.
 func revealPath(ctx context.Context, path string) error {
-	return exec.CommandContext(ctx, cmdOpen, "-R", path).Start()
+	// #nosec G204 -- The application needs to open dynamic files
+	return exec.CommandContext(ctx, cmdOpen, "-R", filepath.Clean(path)).Start()
 }
