@@ -12,7 +12,9 @@ import (
 type SortMode int
 
 const (
+	// SortBySize sorts items by descending size.
 	SortBySize SortMode = iota
+	// SortByName sorts items alphabetically.
 	SortByName
 )
 
@@ -29,9 +31,13 @@ type Node = scanner.Node
 type AppState int
 
 const (
+	// StateScanning is the initial scanning progress view.
 	StateScanning AppState = iota
+	// StateBrowsing is the interactive file browser.
 	StateBrowsing
+	// StateConfirmDelete shows the deletion prompt overlay.
 	StateConfirmDelete
+	// StateError displays any unrecoverable errors.
 	StateError
 )
 

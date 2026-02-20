@@ -33,8 +33,19 @@ func main() {
 	}
 
 	// Verify the path exists
+	// Verify the path exists and is bounded securely
 	cleanRoot := filepath.Clean(absRoot)
-	if _, err := os.Stat(cleanRoot); err != nil {
+	if filepath.VolumeName(cleanRoot) != "" {
+		cleanRoot = filepath.VolumeName(cleanRoot) + filepath.FromSlash(cleanRoot)
+	}
+
+	cleanRootAbs, err := filepath.Abs(cleanRoot)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error computing valid path: %v\n", err)
+		os.Exit(1)
+	}
+
+	if _, err := os.Stat(cleanRootAbs); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}

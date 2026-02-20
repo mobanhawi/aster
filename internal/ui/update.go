@@ -95,17 +95,22 @@ func (m Model) handleKeyConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKeyBrowsing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+
+	// Intercept and handle basic navigation
+	switch key {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
 		}
+		return m, nil
 	case "down", "j":
 		if m.cursor < len(m.visibleChildren())-1 {
 			m.cursor++
 		}
+		return m, nil
 	case "right", "enter", "l":
 		return m.handleNavRight()
 	case "left", "backspace", "h":
@@ -113,12 +118,21 @@ func (m Model) handleKeyBrowsing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.stack = m.stack[:len(m.stack)-1]
 			m.clampCursor()
 		}
+		return m, nil
+	}
+
+	// Dispatch commands to secondary handler
+	return m.handleKeyBrowsingActions(key)
+}
+
+func (m Model) handleKeyBrowsingActions(key string) (tea.Model, tea.Cmd) {
+	switch key {
 	case "s":
 		m.handleSortToggle()
 	case "o":
-		m.handleOpen()
+		_ = m.handleOpen()
 	case "r":
-		m.handleReveal()
+		_ = m.handleReveal()
 	case "d":
 		sel := m.selected()
 		if sel != nil {
@@ -155,39 +169,46 @@ func (m *Model) handleSortToggle() {
 	m.cursor = 0
 }
 
-func (m *Model) handleOpen() {
+func (m *Model) handleOpen() error {
 	sel := m.selected()
 	if sel != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = openPath(ctx, sel.Path)
+		return openPath(ctx, sel.Path)
 	}
+	return nil
 }
 
-func (m *Model) handleReveal() {
+func (m *Model) handleReveal() error {
 	sel := m.selected()
 	if sel != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = revealPath(ctx, sel.Path)
+		return revealPath(ctx, sel.Path)
 	}
+	return nil
 }
+
+const (
+	cmdOsascript = "osascript"
+	cmdOpen      = "open"
+)
 
 // trashItem moves a file/dir to the macOS Trash via osascript (safe delete).
 func trashItem(path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	script := fmt.Sprintf(`tell application "Finder" to delete POSIX file %q`, path)
-	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
+	cmd := exec.CommandContext(ctx, cmdOsascript, "-e", script)
 	return cmd.Run()
 }
 
 // openPath opens a file or directory with the default macOS app.
 func openPath(ctx context.Context, path string) error {
-	return exec.CommandContext(ctx, "open", path).Start()
+	return exec.CommandContext(ctx, cmdOpen, path).Start()
 }
 
 // revealPath reveals an item in Finder.
 func revealPath(ctx context.Context, path string) error {
-	return exec.CommandContext(ctx, "open", "-R", path).Start()
+	return exec.CommandContext(ctx, cmdOpen, "-R", path).Start()
 }
