@@ -27,21 +27,12 @@ jobs:
           args: --timeout=5m
 
       - name: Unit Tests
-        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
-
-      - name: Coverage Summary
         run: |
-          echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
-          echo '```text' >> $GITHUB_STEP_SUMMARY
-          go tool cover -func=coverage.out >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Benchmarks
         run: |
-          echo "## Benchmark Results" >> $GITHUB_STEP_SUMMARY
-          echo '```text' >> $GITHUB_STEP_SUMMARY
-          go test ./... -run='^$' -bench=. -benchmem -benchtime=1x 2>&1 | tee -a $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          go test ./... -bench=. -benchmem -benchtime=1x
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
