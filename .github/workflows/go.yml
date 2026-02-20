@@ -36,6 +36,15 @@ jobs:
           go tool cover -func=coverage.out >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.out
+          flags: unittests
+          name: aster-coverage
+          fail_ci_if_error: true
+
       - name: Cross-shell Compatibility (Bash)
         run: |
           ./aster -v
