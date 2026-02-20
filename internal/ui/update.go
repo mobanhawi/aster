@@ -202,7 +202,7 @@ const (
 )
 
 // trashItem moves a file/dir to the macOS Trash via osascript (safe delete).
-func trashItem(path string) error {
+var trashItem = func(path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -215,13 +215,13 @@ func trashItem(path string) error {
 }
 
 // openPath opens a file or directory with the default macOS app.
-func openPath(ctx context.Context, path string) error {
+var openPath = func(ctx context.Context, path string) error {
 	// #nosec G204 -- The application needs to open dynamic files
 	return exec.CommandContext(ctx, cmdOpen, filepath.Clean(path)).Start()
 }
 
 // revealPath reveals an item in Finder.
-func revealPath(ctx context.Context, path string) error {
+var revealPath = func(ctx context.Context, path string) error {
 	// #nosec G204 -- The application needs to open dynamic files
 	return exec.CommandContext(ctx, cmdOpen, "-R", filepath.Clean(path)).Start()
 }
