@@ -72,9 +72,6 @@ type Model struct {
 	// Live scan progress (updated from progressCh via atomic).
 	scannedBytes *atomic.Int64 // pointer so Model copies share the counter
 	progressCh   chan int64
-
-	// Total disk size hint from Statfs (0 if unavailable).
-	diskTotalBytes int64
 }
 
 // New constructs a fresh model targeting the given root path.
@@ -85,11 +82,10 @@ func New(rootPath string) Model {
 
 	var scanned atomic.Int64
 	return Model{
-		rootPath:       rootPath,
-		state:          StateScanning,
-		sp:             sp,
-		scannedBytes:   &scanned,
-		diskTotalBytes: diskTotal(rootPath),
+		rootPath:     rootPath,
+		state:        StateScanning,
+		sp:           sp,
+		scannedBytes: &scanned,
 	}
 }
 

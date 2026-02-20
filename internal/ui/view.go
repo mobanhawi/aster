@@ -31,19 +31,13 @@ func (m Model) View() string {
 func (m Model) viewScanning() string {
 	header := styleHeader.Width(m.width).Render("  aster")
 
+	// Show live scanned-bytes counter. We purposely avoid showing a percentage
+	// here because we don't know the target directory's total size upfront —
+	// any denominator (e.g. Statfs total) would be relative to the whole
+	// filesystem volume rather than the scanned path, which is misleading.
 	scanned := m.scannedBytes.Load()
 	var progressHint string
-	if m.diskTotalBytes > 0 {
-		pct := float64(scanned) / float64(m.diskTotalBytes) * 100
-		if pct > 100 {
-			pct = 100
-		}
-		progressHint = fmt.Sprintf(" (%s / %s  %.0f%%)",
-			humanize.Bytes(uint64(scanned)),
-			humanize.Bytes(uint64(m.diskTotalBytes)),
-			pct,
-		)
-	} else if scanned > 0 {
+	if scanned > 0 {
 		progressHint = fmt.Sprintf(" (%s scanned)", humanize.Bytes(uint64(scanned)))
 	}
 
