@@ -1,0 +1,133 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - dogsled
+    - durationcheck
+    - errorlint
+    - gocritic
+    - gocyclo
+    - godot
+    - goprintffuncname
+    - gosec
+    - misspell
+    - nakedret
+    - nilerr
+    - noctx
+    - nolintlint
+    - prealloc
+    - predeclared
+    - revive
+    - tparallel
+    - unconvert
+    - unparam
+    - whitespace
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+    gocyclo:
+      min-complexity: 15
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    misspell:
+      locale: US
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    gosec:
+      excludes:
+        - G104 # errcheck already handles this
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+          disabled: false
+        - name: blank-imports
+          severity: warning
+          disabled: false
+        - name: context-as-argument
+          severity: warning
+          disabled: false
+        - name: context-keys-type
+          severity: warning
+          disabled: false
+        - name: dot-imports
+          severity: warning
+          disabled: false
+        - name: error-return
+          severity: warning
+          disabled: false
+        - name: error-strings
+          severity: warning
+          disabled: false
+        - name: error-naming
+          severity: warning
+          disabled: false
+        - name: if-return
+          severity: warning
+          disabled: false
+        - name: receiver-naming
+          severity: warning
+          disabled: false
+        - name: time-naming
+          severity: warning
+          disabled: false
+        - name: unexported-return
+          severity: warning
+          disabled: false
+        - name: indent-error-flow
+          severity: warning
+          disabled: false
+        - name: errorf
+          severity: warning
+          disabled: false
+        - name: empty-block
+          severity: warning
+          disabled: false
+        - name: superfluous-else
+          severity: warning
+          disabled: false
+        - name: unused-parameter
+          severity: warning
+          disabled: false
+        - name: unreachable-code
+          severity: warning
+          disabled: false
+        - name: redefines-builtin-id
+          severity: warning
+          disabled: false
+
+  exclusions:
+    rules:
+      - path: '(.+)_test\.go'
+        linters:
+          - gocyclo
+          - errcheck
+          - dupl
+          - gosec
+          - bodyclose
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+run:
+  timeout: 5m

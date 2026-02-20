@@ -5,7 +5,7 @@ A terminal disk usage analyzer for macOS. Navigate your filesystem, identify lar
 [![CI](https://github.com/mobanhawi/aster/actions/workflows/go.yml/badge.svg)](https://github.com/mobanhawi/aster/actions/workflows/go.yml)
 [![Release](https://github.com/mobanhawi/aster/actions/workflows/release.yml/badge.svg)](https://github.com/mobanhawi/aster/actions/workflows/release.yml)
 [![codecov](https://codecov.io/gh/mobanhawi/aster/branch/main/graph/badge.svg)](https://codecov.io/gh/mobanhawi/aster)
-
+![aster avatar](.assets/goppher-aster.png)
 ![aster TUI](assets/screenshot.png)
 
 ## Install

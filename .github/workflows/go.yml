@@ -18,13 +18,30 @@ jobs:
           go-version: stable
 
       - name: Build
-        run: go build -v ./...
+        run: go build -v -o aster .
 
-      - name: Test with race detector and coverage
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: Unit Tests
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: coverage.out
-          fail_ci_if_error: false
+      - name: Coverage Summary
+        run: |
+          echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          go tool cover -func=coverage.out >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Cross-shell Compatibility (Bash)
+        run: |
+          ./aster -v
+        shell: bash
+
+      - name: Cross-shell Compatibility (Zsh)
+        run: |
+          sudo apt-get update && sudo apt-get install -y zsh
+          zsh -c "./aster -v"

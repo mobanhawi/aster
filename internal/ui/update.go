@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"os/exec"
+	"path/filepath"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,7 +14,6 @@ import (
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -45,134 +46,182 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.state {
 	case StateScanning:
-		if msg.String() == "ctrl+c" || msg.String() == "q" {
-			return m, tea.Quit
-		}
-
+		return m.handleKeyScanning(msg)
 	case StateConfirmDelete:
-		switch msg.String() {
-		case "d", "y", "enter":
-			err := trashItem(m.confirmPath)
-			if err == nil {
-				// Remove from parent's children list
-				parent := m.currentDir()
-				removedSize := int64(0)
-				for i, c := range parent.Children {
-					if c.Path == m.confirmPath {
-						removedSize = c.Size()
-						parent.Children = append(parent.Children[:i], parent.Children[i+1:]...)
-						break
-					}
-				}
-				// Deduct size up the stack
-				for _, anc := range m.stack {
-					anc.AddSize(-removedSize)
-				}
-				if m.root != nil {
-					m.root.AddSize(-removedSize)
-				}
-				m.clampCursor()
-			}
-			m.state = StateBrowsing
-			m.confirmPath = ""
-		case "esc", "n", "q":
-			m.state = StateBrowsing
-			m.confirmPath = ""
-		}
-
+		return m.handleKeyConfirmDelete(msg)
 	case StateBrowsing:
-		switch msg.String() {
-		case "ctrl+c", "q":
-			return m, tea.Quit
-
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-
-		case "down", "j":
-			children := m.visibleChildren()
-			if m.cursor < len(children)-1 {
-				m.cursor++
-			}
-
-		case "right", "enter", "l":
-			sel := m.selected()
-			if sel != nil && sel.IsDir {
-				m.stack = append(m.stack, sel)
-				m.cursor = 0
-			}
-
-		case "left", "backspace", "h":
-			if len(m.stack) > 0 {
-				m.stack = m.stack[:len(m.stack)-1]
-				m.clampCursor()
-			}
-
-		case "s":
-			// Toggle sort mode
-			if m.sort == SortBySize {
-				m.sort = SortByName
-				sortTree(m.root, SortByName)
-			} else {
-				m.sort = SortBySize
-				sortTree(m.root, SortBySize)
-			}
-			m.cursor = 0
-
-		case "o":
-			// Open in Finder / default app
-			sel := m.selected()
-			if sel != nil {
-				openPath(sel.Path)
-			}
-
-		case "r":
-			// Reveal in Finder
-			sel := m.selected()
-			if sel != nil {
-				revealPath(sel.Path)
-			}
-
-		case "d":
-			sel := m.selected()
-			if sel != nil {
-				m.state = StateConfirmDelete
-				m.confirmPath = sel.Path
-			}
-
-		case "g", "home":
-			m.cursor = 0
-
-		case "G", "end":
-			n := len(m.visibleChildren())
-			if n > 0 {
-				m.cursor = n - 1
-			}
-		}
+		return m.handleKeyBrowsing(msg)
 	}
-
 	return m, nil
 }
 
+func (m Model) handleKeyScanning(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" || msg.String() == "q" {
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m Model) handleKeyConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "d", "y", "enter":
+		err := trashItem(m.confirmPath)
+		if err == nil {
+			// Remove from parent's children list
+			parent := m.currentDir()
+			removedSize := int64(0)
+			for i, c := range parent.Children {
+				if c.Path == m.confirmPath {
+					removedSize = c.Size()
+					parent.Children = append(parent.Children[:i], parent.Children[i+1:]...)
+					break
+				}
+			}
+			// Deduct size up the stack
+			for _, anc := range m.stack {
+				anc.AddSize(-removedSize)
+			}
+			if m.root != nil {
+				m.root.AddSize(-removedSize)
+			}
+			m.clampCursor()
+		}
+		m.state = StateBrowsing
+		m.confirmPath = ""
+	case "esc", "n", "q":
+		m.state = StateBrowsing
+		m.confirmPath = ""
+	}
+	return m, nil
+}
+
+func (m Model) handleKeyBrowsing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	// Intercept and handle basic navigation
+	switch key {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.cursor < len(m.visibleChildren())-1 {
+			m.cursor++
+		}
+		return m, nil
+	case "right", "enter", "l":
+		return m.handleNavRight()
+	case "left", "backspace", "h":
+		if len(m.stack) > 0 {
+			m.stack = m.stack[:len(m.stack)-1]
+			m.clampCursor()
+		}
+		return m, nil
+	}
+
+	// Dispatch commands to secondary handler
+	return m.handleKeyBrowsingActions(key)
+}
+
+func (m Model) handleKeyBrowsingActions(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "s":
+		m.handleSortToggle()
+	case "o":
+		if err := m.handleOpen(); err != nil {
+			m.scanErr = err
+			m.state = StateError
+		}
+	case "r":
+		if err := m.handleReveal(); err != nil {
+			m.scanErr = err
+			m.state = StateError
+		}
+	case "d":
+		sel := m.selected()
+		if sel != nil {
+			m.state = StateConfirmDelete
+			m.confirmPath = sel.Path
+		}
+	case "g", "home":
+		m.cursor = 0
+	case "G", "end":
+		if n := len(m.visibleChildren()); n > 0 {
+			m.cursor = n - 1
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) handleNavRight() (tea.Model, tea.Cmd) {
+	sel := m.selected()
+	if sel != nil && sel.IsDir {
+		m.stack = append(m.stack, sel)
+		m.cursor = 0
+	}
+	return *m, nil
+}
+
+func (m *Model) handleSortToggle() {
+	if m.sort == SortBySize {
+		m.sort = SortByName
+		sortTree(m.root, SortByName)
+	} else {
+		m.sort = SortBySize
+		sortTree(m.root, SortBySize)
+	}
+	m.cursor = 0
+}
+
+func (m *Model) handleOpen() error {
+	sel := m.selected()
+	if sel != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		return openPath(ctx, sel.Path)
+	}
+	return nil
+}
+
+func (m *Model) handleReveal() error {
+	sel := m.selected()
+	if sel != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		return revealPath(ctx, sel.Path)
+	}
+	return nil
+}
+
+const (
+	cmdOsascript = "osascript"
+	cmdOpen      = "open"
+)
+
 // trashItem moves a file/dir to the macOS Trash via osascript (safe delete).
 func trashItem(path string) error {
-	script := fmt.Sprintf(`tell application "Finder" to delete POSIX file %q`, path)
-	cmd := exec.Command("osascript", "-e", script)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	cleanedPath := filepath.Clean(path)
+	script := fmt.Sprintf(`tell application "Finder" to delete POSIX file %q`, cleanedPath)
+
+	// #nosec G204 -- The application intentionally constructs commands based on user input, and we've verified sanitization
+	cmd := exec.CommandContext(ctx, cmdOsascript, "-e", script)
 	return cmd.Run()
 }
 
 // openPath opens a file or directory with the default macOS app.
-func openPath(path string) {
-	exec.Command("open", path).Start() //nolint:errcheck
+func openPath(ctx context.Context, path string) error {
+	// #nosec G204 -- The application needs to open dynamic files
+	return exec.CommandContext(ctx, cmdOpen, filepath.Clean(path)).Start()
 }
 
 // revealPath reveals an item in Finder.
-func revealPath(path string) {
-	exec.Command("open", "-R", path).Start() //nolint:errcheck
-}
-
-// removeDir removes a directory and all its contents (fallback for non-macOS or when Finder unavail).
-func removeDir(path string) error {
-	return os.RemoveAll(path)
+func revealPath(ctx context.Context, path string) error {
+	// #nosec G204 -- The application needs to open dynamic files
+	return exec.CommandContext(ctx, cmdOpen, "-R", filepath.Clean(path)).Start()
 }

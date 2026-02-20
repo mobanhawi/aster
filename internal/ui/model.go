@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,7 +12,9 @@ import (
 type SortMode int
 
 const (
+	// SortBySize sorts items by descending size.
 	SortBySize SortMode = iota
+	// SortByName sorts items alphabetically.
 	SortByName
 )
 
@@ -23,11 +24,6 @@ type scanDoneMsg struct {
 	err  error
 }
 
-// progressTickMsg is a periodic tick during scanning.
-type progressTickMsg struct {
-	bytes int64
-}
-
 // Node is a local alias for the scanner node.
 type Node = scanner.Node
 
@@ -35,9 +31,13 @@ type Node = scanner.Node
 type AppState int
 
 const (
+	// StateScanning is the initial scanning progress view.
 	StateScanning AppState = iota
+	// StateBrowsing is the interactive file browser.
 	StateBrowsing
+	// StateConfirmDelete shows the deletion prompt overlay.
 	StateConfirmDelete
+	// StateError displays any unrecoverable errors.
 	StateError
 )
 
@@ -52,7 +52,6 @@ type Model struct {
 	// Scan state
 	state    AppState
 	rootPath string
-	progress int64 // bytes counted during scan
 	scanErr  error
 
 	// UI dimensions
@@ -119,13 +118,6 @@ func sortTree(n *Node, mode SortMode) {
 			sortTree(child, mode)
 		}
 	}
-}
-
-// tickCmd sends periodic progress updates.
-func tickCmd() tea.Cmd {
-	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
-		return progressTickMsg{}
-	})
 }
 
 // currentDir returns the directory currently being browsed.
