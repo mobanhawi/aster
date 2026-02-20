@@ -9,7 +9,7 @@ A terminal disk usage analyzer for macOS. Navigate your filesystem, identify lar
 ![aster avatar](./assets/gopher-aster.png)
 
 ## TUI Screenshot
-![aster TUI](./assets/screenshot.png)
+![aster TUI](./assets/demo.gif)
 
 ## Install
 
