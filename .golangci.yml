@@ -1,3 +1,4 @@
+version: "2"
 linters:
   default: none
   enable:
@@ -130,4 +131,3 @@ formatters:
 
 run:
   timeout: 5m
-  go: '1.25'
