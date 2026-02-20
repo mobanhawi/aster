@@ -1,0 +1,133 @@
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+      - shadow
+  gocyclo:
+    min-complexity: 15
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  misspell:
+    locale: US
+  nolintlint:
+    require-explanation: true
+    require-specific: true
+  gosec:
+    excludes:
+      - G104 # errcheck already handles this
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+        disabled: false
+      - name: blank-imports
+        severity: warning
+        disabled: false
+      - name: context-as-argument
+        severity: warning
+        disabled: false
+      - name: context-keys-type
+        severity: warning
+        disabled: false
+      - name: dot-imports
+        severity: warning
+        disabled: false
+      - name: error-return
+        severity: warning
+        disabled: false
+      - name: error-strings
+        severity: warning
+        disabled: false
+      - name: error-naming
+        severity: warning
+        disabled: false
+      - name: if-return
+        severity: warning
+        disabled: false
+      - name: receiver-naming
+        severity: warning
+        disabled: false
+      - name: time-naming
+        severity: warning
+        disabled: false
+      - name: unexported-return
+        severity: warning
+        disabled: false
+      - name: indent-error-flow
+        severity: warning
+        disabled: false
+      - name: errorf
+        severity: warning
+        disabled: false
+      - name: empty-block
+        severity: warning
+        disabled: false
+      - name: superfluous-else
+        severity: warning
+        disabled: false
+      - name: unused-parameter
+        severity: warning
+        disabled: false
+      - name: unreachable-code
+        severity: warning
+        disabled: false
+      - name: redefines-builtin-id
+        severity: warning
+        disabled: false
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - dogsled
+    - durationcheck
+    - errorlint
+    - exportloopref
+    - gocritic
+    - gocyclo
+    - godot
+    - gofmt
+    - goimports
+    - goprintffuncname
+    - gosec
+    - misspell
+    - nakedret
+    - nilerr
+    - noctx
+    - nolintlint
+    - prealloc
+    - predeclared
+    - revive
+    - stylecheck
+    - tparallel
+    - unconvert
+    - unparam
+    - whitespace
+
+issues:
+  exclude-use-default: false
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - bodyclose
+
+run:
+  timeout: 5m
