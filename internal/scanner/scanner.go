@@ -88,13 +88,13 @@ func scanDir(
 	// 1. Avoid the mandatory alphabetical sort (we sort lazily in UI).
 	// 2. Process in chunks to cap peak memory for massive directories.
 	sem <- struct{}{}
+	// #nosec G304 -- currentPath is a directory being scanned, sanitized by filepath.Abs
 	f, err := os.Open(currentPath)
 	if err != nil {
 		<-sem
 		node.Err = err
 		return
 	}
-	// Note: f.Close() is called AFTER ReadDir processing.
 
 	sep := string(os.PathSeparator)
 	dirPrefix := currentPath
@@ -102,11 +102,7 @@ func scanDir(
 		dirPrefix += sep
 	}
 
-	for {
-		if ctx.Err() != nil {
-			break
-		}
-
+	for ctx.Err() == nil {
 		// Read a batch of entries.
 		// Using f.ReadDir instead of os.ReadDir bypasses the stdlib's sorting.
 		entries, err := f.ReadDir(readDirBatchSize)
@@ -120,55 +116,75 @@ func scanDir(
 			break
 		}
 
-		var batchFilesSize int64
-		// Pre-grow children slice to minimize reallocs within this batch.
-		if cap(node.Children)-len(node.Children) < len(entries) {
-			newCap := len(node.Children) + len(entries)
-			if newCap < cap(node.Children)*2 {
-				newCap = cap(node.Children) * 2
-			}
-			newChildren := make([]*Node, len(node.Children), newCap)
-			copy(newChildren, node.Children)
-			node.Children = newChildren
+		processBatch(ctx, node, entries, dirPrefix, sem, &localChildrenWg, progressCh, globalWg)
+	}
+
+	_ = f.Close()
+	<-sem
+}
+
+// processBatch handles logical processing for a chunk of directory entries,
+// reducing the cyclomatic complexity of scanDir.
+func processBatch(
+	ctx context.Context,
+	node *Node,
+	entries []fs.DirEntry,
+	dirPrefix string,
+	sem chan struct{},
+	localChildrenWg *sync.WaitGroup,
+	progressCh chan<- int64,
+	globalWg *sync.WaitGroup,
+) {
+	var batchFilesSize int64
+
+	// Pre-grow children slice to minimize reallocs.
+	needed := len(node.Children) + len(entries)
+	if cap(node.Children) < needed {
+		newCap := cap(node.Children) * 2
+		if newCap < needed {
+			newCap = needed
+		}
+		newChildren := make([]*Node, len(node.Children), newCap)
+		copy(newChildren, node.Children)
+		node.Children = newChildren
+	}
+
+	for _, entry := range entries {
+		child := &Node{
+			Name:   entry.Name(),
+			Parent: node,
+			IsDir:  entry.IsDir(),
 		}
 
-		for _, entry := range entries {
-			child := &Node{
-				Name:   entry.Name(),
-				Parent: node,
-				IsDir:  entry.IsDir(),
-			}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			child.IsDir = false
+			node.Children = append(node.Children, child)
+			continue
+		}
 
-			if entry.Type()&fs.ModeSymlink != 0 {
-				child.IsDir = false
+		if entry.IsDir() {
+			node.Children = append(node.Children, child)
+			localChildrenWg.Add(1)
+			globalWg.Add(1)
+			childPath := dirPrefix + entry.Name()
+			go scanDir(ctx, child, childPath, localChildrenWg, sem, progressCh, globalWg)
+		} else {
+			info, err := entry.Info()
+			if err != nil {
 				node.Children = append(node.Children, child)
 				continue
 			}
-
-			if entry.IsDir() {
-				node.Children = append(node.Children, child)
-				localChildrenWg.Add(1)
-				globalWg.Add(1)
-				childPath := dirPrefix + entry.Name()
-				go scanDir(ctx, child, childPath, &localChildrenWg, sem, progressCh, globalWg)
-			} else {
-				info, err := entry.Info()
-				if err != nil {
-					node.Children = append(node.Children, child)
-					continue
-				}
-				sz := info.Size()
-				child.SetSize(sz)
-				batchFilesSize += sz
-				node.Children = append(node.Children, child)
-			}
+			sz := info.Size()
+			child.SetSize(sz)
+			batchFilesSize += sz
+			node.Children = append(node.Children, child)
 		}
-		// Update size and progress incrementally per batch.
+	}
+
+	if batchFilesSize > 0 {
 		node.AddSize(batchFilesSize)
 		sendProgress(ctx, progressCh, batchFilesSize)
 	}
-	f.Close()
-	<-sem
 }
 
 func sendProgress(ctx context.Context, ch chan<- int64, sz int64) {
