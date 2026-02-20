@@ -34,6 +34,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = StateBrowsing
 		m.cursor = 0
 		m.stack = nil
+		// Cache the resolved absolute path so breadcrumb() avoids calling
+		// filepath.Abs on every render frame.
+		if msg.root != nil {
+			m.absRoot = msg.root.Path
+			// Mark the root as already sorted (startScan sorted it eagerly).
+			m.markRootSorted()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -171,12 +178,10 @@ func (m *Model) handleSortToggle() {
 	} else {
 		m.sort = SortBySize
 	}
-	// Mark every node as unsorted so each directory re-sorts lazily on first
-	// navigation visit. This is O(N) flag resets instead of O(N log N) sorts
-	// across the entire tree — critical for trees with millions of nodes.
-	if m.root != nil {
-		m.root.ResetSorted()
-	}
+	// Advance the sort generation: each Node caches the generation at which it
+	// was last sorted. A mismatch triggers a lazy re-sort on first access —
+	// O(1) here instead of an O(N) recursive flag walk across the whole tree.
+	m.sortGen++
 	m.cursor = 0
 }
 

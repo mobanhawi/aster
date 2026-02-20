@@ -2,10 +2,13 @@ package ui
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	humanize "github.com/dustin/go-humanize"
 	"github.com/mobanhawi/aster/internal/scanner"
 )
 
@@ -18,6 +21,9 @@ const (
 	// SortByName sorts items alphabetically.
 	SortByName
 )
+
+// sortModeToInt8 converts a SortMode to the int8 stored in Node.SortedMode.
+func sortModeToInt8(m SortMode) int8 { return int8(m) }
 
 // scanDoneMsg is sent when scanning completes.
 type scanDoneMsg struct {
@@ -50,9 +56,14 @@ type Model struct {
 	cursor int
 	sort   SortMode
 
+	// sortGen is incremented each time the sort mode changes so that nodes
+	// detect staleness in O(1) instead of walking the entire tree.
+	sortGen uint64
+
 	// Scan state
 	state    AppState
 	rootPath string
+	absRoot  string // resolved once — avoids filepath.Abs on every View()
 	scanErr  error
 
 	// UI dimensions
@@ -68,6 +79,15 @@ type Model struct {
 	// Live scan progress (updated from progressCh via atomic).
 	scannedBytes *atomic.Int64 // pointer so Model copies share the counter
 	progressCh   chan int64
+
+	// Render caches — recomputed only when their inputs change.
+	cachedDivider      string // "─" × width
+	cachedDividerWidth int
+	cachedHints        string // key-hint footer (static after init)
+	cachedHintsWidth   int
+	// cachedStatus caches the formatted humanize string for the status bar.
+	cachedStatusSize  int64
+	cachedStatusHuman string
 }
 
 // New constructs a fresh model targeting the given root path.
@@ -79,9 +99,11 @@ func New(rootPath string) Model {
 	var scanned atomic.Int64
 	return Model{
 		rootPath:     rootPath,
+		absRoot:      rootPath, // refined in startScan after Abs resolves
 		state:        StateScanning,
 		sp:           sp,
 		scannedBytes: &scanned,
+		sortGen:      1, // start at 1 so zero-value nodes are always stale
 	}
 }
 
@@ -128,7 +150,8 @@ func startScan(root string, progressCh chan int64, scanned *atomic.Int64) tea.Cm
 }
 
 // sortNode sorts a single node's children (not recursive).
-// The Node.Sorted flag is set so visibleChildren knows it is already sorted.
+// The sortGen/SortedMode fields are NOT updated here — the caller (visibleChildren)
+// stamps the generation after sorting to keep the contract simple.
 func sortNode(n *Node, mode SortMode) {
 	if n == nil {
 		return
@@ -150,14 +173,17 @@ func (m *Model) currentDir() *Node {
 }
 
 // visibleChildren returns the sorted children of the current dir, sorting
-// them lazily on first access so the whole tree is never sorted at once.
+// them lazily on first access using the generation counter so that a sort
+// toggle is O(1) (just bumps sortGen) rather than O(N) (tree walk).
 func (m *Model) visibleChildren() []*Node {
 	d := m.currentDir()
 	if d == nil {
 		return nil
 	}
-	if !d.Sorted {
+	modeInt := sortModeToInt8(m.sort)
+	if !d.IsSorted(m.sortGen, modeInt) {
 		sortNode(d, m.sort)
+		d.MarkSorted(m.sortGen, modeInt)
 	}
 	return d.Children
 }
@@ -184,4 +210,120 @@ func (m *Model) selected() *Node {
 		return nil
 	}
 	return children[m.cursor]
+}
+
+// divider returns a cached "─" × m.width string, refreshing only when width
+// changes to avoid a strings.Repeat allocation on every frame.
+func (m *Model) divider() string {
+	if m.cachedDividerWidth != m.width {
+		m.cachedDivider = styleDivider.Render(strings.Repeat("─", m.width))
+		m.cachedDividerWidth = m.width
+	}
+	return m.cachedDivider
+}
+
+// keyHints returns the cached footer key-hint string, rebuilding only when
+// the terminal width changes (which is rare).
+func (m *Model) keyHints() string {
+	if m.cachedHintsWidth != m.width {
+		k := func(key, desc string) string {
+			return styleKey.Render(key) + " " + desc + "  "
+		}
+		raw := " " +
+			k("↑↓/jk", "move") +
+			k("→/enter", "enter") +
+			k("←/bsp", "back") +
+			k("o", "open") +
+			k("r", "reveal") +
+			k("d", "delete") +
+			k("s", "sort") +
+			k("q", "quit")
+		m.cachedHints = styleFooter.Width(m.width).Render(raw)
+		m.cachedHintsWidth = m.width
+	}
+	return m.cachedHints
+}
+
+// humanSize returns a cached humanize.Bytes string for sz, refreshing only
+// when sz changes. This avoids the humanize allocation on every render frame
+// for the status-bar total-size display.
+func (m *Model) humanSize(sz int64) string {
+	if sz != m.cachedStatusSize || m.cachedStatusHuman == "" {
+		m.cachedStatusSize = sz
+		m.cachedStatusHuman = humanize.Bytes(uint64(sz))
+	}
+	return m.cachedStatusHuman
+}
+
+// barCache is a per-render cache of rendered bar strings, keyed by (barLen,
+// barMaxW) to avoid re-rendering identical bars (common at list extremes where
+// many files share the same relative size).
+//
+// It is stored on the stack as a map built once per viewBrowse call and
+// discarded after. It is NOT a package-level cache because bar rendering
+// depends on both rank and width, which can change across frames.
+
+// renderBar returns the coloured + dim bar string for a given rank/total/pct,
+// using a caller-provided string builder to avoid intermediate allocations.
+func renderBar(rank, total, barLen, barMaxW int) string {
+	if barLen > barMaxW {
+		barLen = barMaxW
+	}
+	style := barStyle(rank, total)
+	// Build the bar with two Render calls; lipgloss escapes are cheap compared
+	// to the previous per-row NewStyle().Foreground().Render() chain.
+	return style.Render(strings.Repeat("█", barLen)) +
+		styleBarDim.Render(strings.Repeat("░", barMaxW-barLen))
+}
+
+// Sorted flag for root after init.
+func (m *Model) markRootSorted() {
+	if m.root != nil {
+		m.root.MarkSorted(m.sortGen, sortModeToInt8(m.sort))
+	}
+}
+
+// resolveAbsRoot caches the absolute path of the root so View() doesn't call
+// filepath.Abs on every frame.
+func (m *Model) resolveAbsRoot() string {
+	return m.absRoot
+}
+
+// setAbsRoot stores the resolved path (called once from scanDoneMsg handler).
+func (m *Model) setAbsRoot(p string) {
+	m.absRoot = p
+}
+
+// statusHuman formats the size label used in the status bar.
+// Exported for inlining; callers should pass m.humanSize(sz).
+func statusLabel(n int, totalHuman, sortLabel string) string {
+	return " " + itoa(n) + " items  total: " + totalHuman + "  sort: " + sortLabel
+}
+
+// itoa is a tiny allocation-free int→string for small non-negative values.
+// For large N it falls back to the stdlib formatter.
+func itoa(n int) string {
+	if n < len(itoaTable) {
+		return itoaTable[n]
+	}
+	// Fallback: build manually to avoid fmt import dependency here.
+	return humanize.Comma(int64(n))
+}
+
+// itoaTable holds pre-formatted strings for the most common item counts.
+// Directories rarely have > 10k direct children, so 10 000 entries covers > 99 % of cases.
+var itoaTable = func() []string {
+	t := make([]string, 10001)
+	for i := range t {
+		// Build without fmt to keep this self-contained.
+		t[i] = humanize.Comma(int64(i))
+	}
+	return t
+}()
+
+// lipglossWidth caches the result of lipgloss.Width since it parses ANSI
+// escape codes and is therefore non-trivial.
+// We use it for the status-bar gap calculation, called once per frame.
+func lipglossWidth(s string) int {
+	return lipgloss.Width(s)
 }

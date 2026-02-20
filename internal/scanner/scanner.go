@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 )
 
@@ -117,12 +118,25 @@ func scanDir(
 	// all their sizes to propagate before we propagate our own size upward.
 	var childrenWg sync.WaitGroup
 
+	// parentPath is used for manual path joining — avoids the allocations
+	// inside filepath.Join (separator normalisation, path.Clean, etc.) since
+	// node.Path is already clean and absolute.
+	parentPath := node.Path
+	needSep := !strings.HasSuffix(parentPath, string(os.PathSeparator))
+
 	for _, entry := range entries {
 		if ctx.Err() != nil {
 			break
 		}
 
-		entryPath := filepath.Join(node.Path, entry.Name())
+		// Fast path: build child path without filepath.Join overhead.
+		var entryPath string
+		if needSep {
+			entryPath = parentPath + string(os.PathSeparator) + entry.Name()
+		} else {
+			entryPath = parentPath + entry.Name()
+		}
+
 		child := &Node{
 			Name:  entry.Name(),
 			Path:  entryPath,

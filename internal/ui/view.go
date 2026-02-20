@@ -10,6 +10,13 @@ import (
 	humanize "github.com/dustin/go-humanize"
 )
 
+// barFill and barDim are pre-built strings of the maximum bar width — we slice
+// them to length instead of calling strings.Repeat on every row every frame.
+const maxBarW = 30
+
+var barFill = strings.Repeat("█", maxBarW) // sliced for the filled portion
+var barDim = strings.Repeat("░", maxBarW)  // sliced for the empty portion
+
 // View implements tea.Model.
 func (m Model) View() string {
 	if m.width == 0 {
@@ -38,10 +45,10 @@ func (m Model) viewScanning() string {
 	scanned := m.scannedBytes.Load()
 	var progressHint string
 	if scanned > 0 {
-		progressHint = fmt.Sprintf(" (%s scanned)", humanize.Bytes(uint64(scanned)))
+		progressHint = " (" + humanize.Bytes(uint64(scanned)) + " scanned)"
 	}
 
-	msg := styleScanning.Render(fmt.Sprintf("\n  %s Scanning %s…%s\n", m.sp.View(), m.rootPath, progressHint))
+	msg := styleScanning.Render("\n  " + m.sp.View() + " Scanning " + m.rootPath + "…" + progressHint + "\n")
 	hint := styleFooter.Width(m.width).Render(" Press q to quit")
 	return lipgloss.JoinVertical(lipgloss.Left, header, msg, hint)
 }
@@ -49,7 +56,7 @@ func (m Model) viewScanning() string {
 // viewError renders an error screen.
 func (m Model) viewError() string {
 	header := styleHeader.Width(m.width).Render("  aster — Error")
-	msg := styleError.Render(fmt.Sprintf("\n  ✗ %v\n", m.scanErr))
+	msg := styleError.Render("\n  ✗ " + m.scanErr.Error() + "\n")
 	hint := styleFooter.Width(m.width).Render(" Press q to quit")
 	return lipgloss.JoinVertical(lipgloss.Left, header, msg, hint)
 }
@@ -64,8 +71,8 @@ func (m Model) viewBrowse() string {
 	// ── Breadcrumb ───────────────────────────────────────────────────────────
 	lines = append(lines, styleBreadcrumb.Width(m.width).Render(m.breadcrumb()))
 
-	// ── Divider ──────────────────────────────────────────────────────────────
-	lines = append(lines, styleDivider.Render(strings.Repeat("─", m.width)))
+	// ── Divider (cached by width) ─────────────────────────────────────────────
+	lines = append(lines, m.divider())
 
 	// ── File list ────────────────────────────────────────────────────────────
 	children := m.visibleChildren()
@@ -73,6 +80,15 @@ func (m Model) viewBrowse() string {
 	totalSize := int64(0)
 	if current != nil {
 		totalSize = current.Size()
+	}
+
+	// Bar max width — capped globally, clamped for narrow terminals.
+	barMaxW := m.width / 4
+	if barMaxW > maxBarW {
+		barMaxW = maxBarW
+	}
+	if barMaxW < 4 {
+		barMaxW = 4
 	}
 
 	// How many rows we can show (reserve header+breadcrumb+divider+footer+status = 6 rows)
@@ -86,7 +102,7 @@ func (m Model) viewBrowse() string {
 
 	for i := start; i < end; i++ {
 		child := children[i]
-		row := m.renderRow(child, i, len(children), totalSize, i == m.cursor)
+		row := m.renderRow(child, i, len(children), totalSize, barMaxW, i == m.cursor)
 		lines = append(lines, row)
 	}
 
@@ -95,17 +111,19 @@ func (m Model) viewBrowse() string {
 		lines = append(lines, "")
 	}
 
-	// ── Divider ──────────────────────────────────────────────────────────────
-	lines = append(lines, styleDivider.Render(strings.Repeat("─", m.width)))
+	// ── Divider (cached) ──────────────────────────────────────────────────────
+	lines = append(lines, m.divider())
 
 	// ── Status bar ───────────────────────────────────────────────────────────
 	sortLabel := "size"
 	if m.sort == SortByName {
 		sortLabel = "name"
 	}
-	statusLeft := fmt.Sprintf(" %d items  total: %s  sort: %s",
-		len(children), humanize.Bytes(uint64(totalSize)), sortLabel)
-	statusRight := "scroll: " + scrollIndicator(m.cursor, len(children)) + " "
+	n := len(children)
+	// Use caches: humanSize avoids re-running humanize on every frame;
+	// itoa avoids fmt.Sprintf for item count.
+	statusLeft := " " + itoa(n) + " items  total: " + m.humanSize(totalSize) + "  sort: " + sortLabel
+	statusRight := "scroll: " + scrollIndicator(m.cursor, n) + " "
 	gap := m.width - utf8.RuneCountInString(statusLeft) - utf8.RuneCountInString(statusRight)
 	if gap < 0 {
 		gap = 0
@@ -113,15 +131,14 @@ func (m Model) viewBrowse() string {
 	statusLine := styleFooter.Render(statusLeft + strings.Repeat(" ", gap) + statusRight)
 	lines = append(lines, statusLine)
 
-	// ── Key hints ────────────────────────────────────────────────────────────
-	hints := m.keyHints()
-	lines = append(lines, styleFooter.Width(m.width).Render(hints))
+	// ── Key hints (cached by width) ───────────────────────────────────────────
+	lines = append(lines, m.keyHints())
 
 	// ── Confirm-delete overlay ────────────────────────────────────────────────
 	if m.state == StateConfirmDelete {
 		name := filepath.Base(m.confirmPath)
 		prompt := styleConfirm.Width(m.width).Render(
-			fmt.Sprintf("  ⚠  Move to Trash: %s ? [d/y/enter = yes  esc/n = no]", truncate(name, m.width-50)),
+			"  ⚠  Move to Trash: " + truncate(name, m.width-50) + " ? [d/y/enter = yes  esc/n = no]",
 		)
 		lines = append(lines, prompt)
 	}
@@ -130,16 +147,8 @@ func (m Model) viewBrowse() string {
 }
 
 // renderRow renders a single file/dir row.
-func (m Model) renderRow(node *Node, rank, total int, parentSize int64, selected bool) string {
-	// Bar width: reserve space for icon + name + size + pct
-	barMaxW := m.width / 4
-	if barMaxW > 30 {
-		barMaxW = 30
-	}
-	if barMaxW < 4 {
-		barMaxW = 4
-	}
-
+// barMaxW is pre-computed by the caller to avoid repeating the clamping math.
+func (m Model) renderRow(node *Node, rank, total int, parentSize int64, barMaxW int, selected bool) string {
 	// Proportion of parent
 	pct := 0.0
 	if parentSize > 0 {
@@ -149,9 +158,14 @@ func (m Model) renderRow(node *Node, rank, total int, parentSize int64, selected
 	if barLen == 0 && node.Size() > 0 {
 		barLen = 1
 	}
+	if barLen > barMaxW {
+		barLen = barMaxW
+	}
 
-	bar := barStyle(rank, total).Render(strings.Repeat("█", barLen)) +
-		styleBarDim.Render(strings.Repeat("░", barMaxW-barLen))
+	// Build bar by slicing pre-allocated strings to avoid strings.Repeat per row.
+	filledPart := barFill[:barLen]
+	dimPart := barDim[:barMaxW-barLen]
+	bar := barStyle(rank, total).Render(filledPart) + styleBarDim.Render(dimPart)
 
 	// Icon + name
 	icon := styleFile.Render("  ")
@@ -185,11 +199,17 @@ func (m Model) renderRow(node *Node, rank, total int, parentSize int64, selected
 	return row
 }
 
-// breadcrumb returns a readable "~ > dir > subdir" path.
+// breadcrumb returns a readable "~ › dir › subdir" path.
+// Uses m.absRoot which was resolved once at scan time instead of calling
+// filepath.Abs on every render frame.
 func (m Model) breadcrumb() string {
-	home, err := filepath.Abs(m.rootPath)
-	if err != nil {
-		home = m.rootPath
+	home := m.absRoot
+	if home == "" {
+		var err error
+		home, err = filepath.Abs(m.rootPath)
+		if err != nil {
+			home = m.rootPath
+		}
 	}
 	parts := make([]string, 0, len(m.stack)+1)
 	parts = append(parts, " "+home)
@@ -197,22 +217,6 @@ func (m Model) breadcrumb() string {
 		parts = append(parts, n.Name)
 	}
 	return strings.Join(parts, " › ")
-}
-
-// keyHints returns the footer key hint string.
-func (m Model) keyHints() string {
-	k := func(key, desc string) string {
-		return styleKey.Render(key) + " " + desc + "  "
-	}
-	return " " +
-		k("↑↓/jk", "move") +
-		k("→/enter", "enter") +
-		k("←/bsp", "back") +
-		k("o", "open") +
-		k("r", "reveal") +
-		k("d", "delete") +
-		k("s", "sort") +
-		k("q", "quit")
 }
 
 // scrollWindow returns [start, end) to keep cursor visible in listHeight rows.
@@ -240,7 +244,7 @@ func scrollIndicator(cursor, total int) string {
 	if total == 0 {
 		return "0/0"
 	}
-	return fmt.Sprintf("%d/%d", cursor+1, total)
+	return itoa(cursor+1) + "/" + itoa(total)
 }
 
 // truncate shortens a string with an ellipsis if it exceeds maxLen runes.

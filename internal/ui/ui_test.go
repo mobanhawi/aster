@@ -44,22 +44,32 @@ func TestSortNode(t *testing.T) {
 	root.Children[1].SetSize(20)
 
 	// Lazy sort: mark as unsorted then call sortNode (single level only)
-	root.Sorted = false
+	// Generation 0, mode -1 (never sorted) → IsSorted returns false.
+	const gen0 = uint64(0)
+	const modeSize = int8(0) // SortBySize = 0
+	const modeName = int8(1) // SortByName = 1
+
 	sortNode(root, SortBySize)
+	root.MarkSorted(gen0, modeSize)
 	if root.Children[0].Name != "a" {
 		t.Errorf("expected 'a' to be sorted first by size")
 	}
 
-	root.Sorted = false
+	// Simulate a generation advance (as handleSortToggle does via sortGen++).
+	const gen1 = uint64(1)
+	if root.IsSorted(gen1, modeName) {
+		t.Errorf("expected node to be stale after generation advance")
+	}
 	sortNode(root, SortByName)
+	root.MarkSorted(gen1, modeName)
 	if root.Children[0].Name != "a" {
 		t.Errorf("expected 'a' to be sorted first by name")
 	}
 
-	// ResetSorted should mark whole tree as unsorted
+	// ResetSorted should reset the cached generation to 0 (compat shim).
 	root.ResetSorted()
-	if root.Sorted {
-		t.Errorf("expected root.Sorted to be false after ResetSorted")
+	if root.IsSorted(gen1, modeName) {
+		t.Errorf("expected root to be stale after ResetSorted")
 	}
 }
 
