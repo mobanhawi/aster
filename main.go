@@ -9,7 +9,14 @@ import (
 	"github.com/mobanhawi/aster/internal/ui"
 )
 
+var version = "dev"
+
 func main() {
+	if len(os.Args) >= 2 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
+		fmt.Printf("aster version %s\n", version)
+		os.Exit(0)
+	}
+
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: aster <path>")
 		fmt.Fprintln(os.Stderr, "       aster ~/Downloads")

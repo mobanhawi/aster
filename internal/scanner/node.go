@@ -1,6 +1,8 @@
 package scanner
 
 import (
+	"cmp"
+	"slices"
 	"sync/atomic"
 )
 
@@ -31,27 +33,14 @@ func (n *Node) SetSize(bytes int64) {
 
 // SortBySize sorts children by size descending (largest first).
 func (n *Node) SortBySize() {
-	sortNodes(n.Children, func(a, b *Node) bool {
-		return a.Size() > b.Size()
+	slices.SortFunc(n.Children, func(a, b *Node) int {
+		return cmp.Compare(b.Size(), a.Size())
 	})
 }
 
 // SortByName sorts children alphabetically by name.
 func (n *Node) SortByName() {
-	sortNodes(n.Children, func(a, b *Node) bool {
-		return a.Name < b.Name
+	slices.SortFunc(n.Children, func(a, b *Node) int {
+		return cmp.Compare(a.Name, b.Name)
 	})
-}
-
-// sortNodes is an in-place insertion sort for small-to-medium slices.
-func sortNodes(nodes []*Node, less func(a, b *Node) bool) {
-	for i := 1; i < len(nodes); i++ {
-		key := nodes[i]
-		j := i - 1
-		for j >= 0 && less(key, nodes[j]) {
-			nodes[j+1] = nodes[j]
-			j--
-		}
-		nodes[j+1] = key
-	}
 }
