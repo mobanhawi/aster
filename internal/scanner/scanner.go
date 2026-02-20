@@ -88,7 +88,7 @@ func scanDir(
 	// 1. Avoid the mandatory alphabetical sort (we sort lazily in UI).
 	// 2. Process in chunks to cap peak memory for massive directories.
 	sem <- struct{}{}
-	// #nosec G304 -- currentPath is a directory being scanned, sanitized by filepath.Abs
+	// #nosec G304,G703 -- currentPath is a directory being scanned, sanitized by filepath.Abs in Scan()
 	f, err := os.Open(currentPath)
 	if err != nil {
 		<-sem
@@ -119,7 +119,9 @@ func scanDir(
 		processBatch(ctx, node, entries, dirPrefix, sem, &localChildrenWg, progressCh, globalWg)
 	}
 
-	_ = f.Close()
+	if cerr := f.Close(); cerr != nil && node.Err == nil {
+		node.Err = cerr
+	}
 	<-sem
 }
 
