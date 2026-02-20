@@ -160,7 +160,11 @@ func (m Model) renderRow(node *Node, rank, total int, parentSize int64, selected
 	}
 	name := nameStyle.Width(nameW).Render(icon + truncate(node.Name, nameW-3))
 
-	sizeStr := styleSize.Render(humanize.Bytes(uint64(node.Size()))) //nolint:gosec
+	sz := node.Size()
+	if sz < 0 {
+		sz = 0
+	}
+	sizeStr := styleSize.Render(humanize.Bytes(uint64(sz)))
 	pctStr := stylePct.Render(fmt.Sprintf("%4.0f%%", pct*100))
 
 	row := bar + " " + name + sizeStr + pctStr

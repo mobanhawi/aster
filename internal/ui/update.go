@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,6 +13,7 @@ import (
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -96,88 +99,96 @@ func (m Model) handleKeyBrowsing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
-
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
 		}
-
 	case "down", "j":
-		children := m.visibleChildren()
-		if m.cursor < len(children)-1 {
+		if m.cursor < len(m.visibleChildren())-1 {
 			m.cursor++
 		}
-
 	case "right", "enter", "l":
-		sel := m.selected()
-		if sel != nil && sel.IsDir {
-			m.stack = append(m.stack, sel)
-			m.cursor = 0
-		}
-
+		return m.handleNavRight()
 	case "left", "backspace", "h":
 		if len(m.stack) > 0 {
 			m.stack = m.stack[:len(m.stack)-1]
 			m.clampCursor()
 		}
-
 	case "s":
-		// Toggle sort mode
-		if m.sort == SortBySize {
-			m.sort = SortByName
-			sortTree(m.root, SortByName)
-		} else {
-			m.sort = SortBySize
-			sortTree(m.root, SortBySize)
-		}
-		m.cursor = 0
-
+		m.handleSortToggle()
 	case "o":
-		// Open in Finder / default app
-		sel := m.selected()
-		if sel != nil {
-			openPath(sel.Path)
-		}
-
+		m.handleOpen()
 	case "r":
-		// Reveal in Finder
-		sel := m.selected()
-		if sel != nil {
-			revealPath(sel.Path)
-		}
-
+		m.handleReveal()
 	case "d":
 		sel := m.selected()
 		if sel != nil {
 			m.state = StateConfirmDelete
 			m.confirmPath = sel.Path
 		}
-
 	case "g", "home":
 		m.cursor = 0
-
 	case "G", "end":
-		n := len(m.visibleChildren())
-		if n > 0 {
+		if n := len(m.visibleChildren()); n > 0 {
 			m.cursor = n - 1
 		}
 	}
 	return m, nil
 }
 
+func (m *Model) handleNavRight() (tea.Model, tea.Cmd) {
+	sel := m.selected()
+	if sel != nil && sel.IsDir {
+		m.stack = append(m.stack, sel)
+		m.cursor = 0
+	}
+	return *m, nil
+}
+
+func (m *Model) handleSortToggle() {
+	if m.sort == SortBySize {
+		m.sort = SortByName
+		sortTree(m.root, SortByName)
+	} else {
+		m.sort = SortBySize
+		sortTree(m.root, SortBySize)
+	}
+	m.cursor = 0
+}
+
+func (m *Model) handleOpen() {
+	sel := m.selected()
+	if sel != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = openPath(ctx, sel.Path)
+	}
+}
+
+func (m *Model) handleReveal() {
+	sel := m.selected()
+	if sel != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = revealPath(ctx, sel.Path)
+	}
+}
+
 // trashItem moves a file/dir to the macOS Trash via osascript (safe delete).
 func trashItem(path string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 	script := fmt.Sprintf(`tell application "Finder" to delete POSIX file %q`, path)
-	cmd := exec.Command("osascript", "-e", script) //nolint:gosec
+	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
 	return cmd.Run()
 }
 
 // openPath opens a file or directory with the default macOS app.
-func openPath(path string) {
-	exec.Command("open", path).Start() //nolint:errcheck,gosec
+func openPath(ctx context.Context, path string) error {
+	return exec.CommandContext(ctx, "open", path).Start()
 }
 
 // revealPath reveals an item in Finder.
-func revealPath(path string) {
-	exec.Command("open", "-R", path).Start() //nolint:errcheck,gosec
+func revealPath(ctx context.Context, path string) error {
+	return exec.CommandContext(ctx, "open", "-R", path).Start()
 }
