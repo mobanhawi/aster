@@ -44,3 +44,15 @@ homebrew_casks:
     homepage: https://github.com/mobanhawi/aster
     description: Terminal disk usage analyzer for macOS
     license: MIT
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr",
+              args: ["-dr", "com.apple.quarantine", "#{staged_path}/aster"]
+          end
+    repository:
+      owner: mobanhawi
+      name: homebrew-aster
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
