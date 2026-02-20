@@ -9,17 +9,13 @@ import (
 	"sync"
 )
 
-// workItem is a unit of work for the directory scanner pool.
-type workItem struct {
-	node    *Node
-	parent  *Node           // nil for root; size is propagated to parent when done
-	itemWg  *sync.WaitGroup // per-item, Done() called when THIS dir is finished
-	totalWg *sync.WaitGroup // global, Add/Done mirrors itemWg for root waiter
-}
-
-// Scan walks the directory tree rooted at root concurrently using a bounded
-// worker pool (NumCPU*2 goroutines) so that scanning very deep or wide trees
-// does not create tens of thousands of goroutines.
+// Scan walks the directory tree rooted at root concurrently using a semaphore-
+// limited goroutine-per-directory model. A buffered semaphore caps the number
+// of goroutines simultaneously performing directory I/O (NumCPU*2, min 4),
+// preventing both goroutine explosion on very wide/deep trees and the
+// bounded-channel deadlock that occurred in the previous bounded worker-pool
+// design (where all workers could block trying to enqueue new work into the
+// same full channel they were consuming from).
 //
 // progressCh (optional) receives byte counts as files are encountered.
 // Sends are non-blocking — if the consumer is slow, progress ticks are dropped
@@ -48,77 +44,77 @@ func Scan(ctx context.Context, root string, progressCh chan<- int64) (*Node, err
 		return rootNode, nil
 	}
 
-	// Bounded worker pool: cap goroutines at NumCPU*2 (min 4).
+	// Semaphore caps concurrent directory I/O goroutines.
 	numWorkers := runtime.NumCPU() * 2
 	if numWorkers < 4 {
 		numWorkers = 4
 	}
+	sem := make(chan struct{}, numWorkers)
 
-	// Queue depth: large buffer avoids workers starving while items are being
-	// enqueued. numWorkers*32 is generous without being wasteful.
-	queue := make(chan workItem, numWorkers*32)
-
-	// Workers drain the queue until it is closed.
-	var poolWg sync.WaitGroup
-	for range numWorkers {
-		poolWg.Add(1)
-		go func() {
-			defer poolWg.Done()
-			for item := range queue {
-				processDir(ctx, item, queue, progressCh)
-			}
-		}()
-	}
-
-	// totalWg tracks every directory still in-flight across the whole tree.
-	var totalWg sync.WaitGroup
-	rootItemWg := &sync.WaitGroup{}
-
-	totalWg.Add(1)
-	rootItemWg.Add(1)
-	queue <- workItem{
-		node:    rootNode,
-		parent:  nil,
-		itemWg:  rootItemWg,
-		totalWg: &totalWg,
-	}
-
-	// Block until every directory in the tree has been processed.
-	totalWg.Wait()
-	close(queue)
-	poolWg.Wait()
+	// globalWg tracks every in-flight scanDir goroutine so Scan can wait for
+	// the entire tree to finish before returning.
+	var globalWg sync.WaitGroup
+	globalWg.Add(1)
+	go scanDir(ctx, rootNode, nil, nil, sem, progressCh, &globalWg)
+	globalWg.Wait()
 
 	return rootNode, nil
 }
 
-// processDir reads a single directory, handles its file children inline, and
-// enqueues subdirectory children as new work items. When it returns it signals
-// both itemWg and totalWg and propagates its accumulated size to the parent.
-func processDir(ctx context.Context, item workItem, queue chan<- workItem, progressCh chan<- int64) {
+// scanDir reads a single directory, processes its file children inline, and
+// spawns a new goroutine (bounded by sem) for each subdirectory child.
+//
+// It acquires the semaphore only for the os.ReadDir call, then releases it
+// immediately so that child goroutines can also acquire it. This prevents the
+// deadlock where holding the semaphore while enqueuing children causes
+// starvation when the semaphore is exhausted.
+//
+// parentWg is the WaitGroup belonging to this node's *parent* — Done() is
+// called on it when this goroutine finishes so the parent can wait for all
+// its direct children before propagating its own size upward.
+func scanDir(
+	ctx context.Context,
+	node *Node,
+	parent *Node,
+	parentWg *sync.WaitGroup, // signal parent when done
+	sem chan struct{},
+	progressCh chan<- int64,
+	globalWg *sync.WaitGroup,
+) {
 	defer func() {
-		if item.parent != nil {
-			item.parent.AddSize(item.node.Size())
+		// Propagate our accumulated size to the parent.
+		if parent != nil {
+			parent.AddSize(node.Size())
 		}
-		item.itemWg.Done()
-		item.totalWg.Done()
+		// Signal our parent's childrenWg (if any) that we are done.
+		if parentWg != nil {
+			parentWg.Done()
+		}
+		globalWg.Done()
 	}()
 
 	if ctx.Err() != nil {
 		return
 	}
 
-	entries, err := os.ReadDir(item.node.Path)
+	// Acquire semaphore before doing directory I/O; release immediately after.
+	// Releasing before spawning children means children can also acquire the
+	// semaphore without deadlocking.
+	sem <- struct{}{}
+	entries, err := os.ReadDir(node.Path)
+	<-sem
+
 	if err != nil {
-		item.node.Err = err
+		node.Err = err
 		return
 	}
 
 	// Pre-allocate to the exact entry count to avoid repeated slice reallocs
 	// for directories with many entries (e.g. node_modules with 50 000 files).
-	item.node.Children = make([]*Node, 0, len(entries))
+	node.Children = make([]*Node, 0, len(entries))
 
-	// childrenWg: tracks subdirectory items we enqueue so we can wait for
-	// their sizes to be propagated back before we call our own Done().
+	// childrenWg tracks our direct subdirectory children so we can wait for
+	// all their sizes to propagate before we propagate our own size upward.
 	var childrenWg sync.WaitGroup
 
 	for _, entry := range entries {
@@ -126,7 +122,7 @@ func processDir(ctx context.Context, item workItem, queue chan<- workItem, progr
 			break
 		}
 
-		entryPath := filepath.Join(item.node.Path, entry.Name())
+		entryPath := filepath.Join(node.Path, entry.Name())
 		child := &Node{
 			Name:  entry.Name(),
 			Path:  entryPath,
@@ -136,42 +132,26 @@ func processDir(ctx context.Context, item workItem, queue chan<- workItem, progr
 		// Never follow symlinks — avoids infinite cycles.
 		if entry.Type()&fs.ModeSymlink != 0 {
 			child.IsDir = false
-			item.node.Children = append(item.node.Children, child)
+			node.Children = append(node.Children, child)
 			continue
 		}
 
 		if entry.IsDir() {
-			item.node.Children = append(item.node.Children, child)
-
-			childWg := &sync.WaitGroup{}
-			childWg.Add(1)
+			node.Children = append(node.Children, child)
 			childrenWg.Add(1)
-			item.totalWg.Add(1)
-
-			queue <- workItem{
-				node:    child,
-				parent:  item.node,
-				itemWg:  childWg,
-				totalWg: item.totalWg,
-			}
-
-			// When the child finishes (its itemWg reaches zero), signal our
-			// childrenWg so the parent wait below can unblock.
-			go func(cwg *sync.WaitGroup) {
-				cwg.Wait()
-				childrenWg.Done()
-			}(childWg)
+			globalWg.Add(1)
+			go scanDir(ctx, child, node, &childrenWg, sem, progressCh, globalWg)
 		} else {
 			info, err := entry.Info()
 			if err != nil {
-				item.node.Children = append(item.node.Children, child)
+				node.Children = append(node.Children, child)
 				continue
 			}
 			size := info.Size()
 			child.SetSize(size)
-			item.node.AddSize(size)
+			node.AddSize(size)
 			sendProgress(ctx, progressCh, size)
-			item.node.Children = append(item.node.Children, child)
+			node.Children = append(node.Children, child)
 		}
 	}
 

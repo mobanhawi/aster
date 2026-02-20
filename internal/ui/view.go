@@ -150,8 +150,7 @@ func (m Model) renderRow(node *Node, rank, total int, parentSize int64, selected
 		barLen = 1
 	}
 
-	color := barColor(rank, total)
-	bar := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("█", barLen)) +
+	bar := barStyle(rank, total).Render(strings.Repeat("█", barLen)) +
 		styleBarDim.Render(strings.Repeat("░", barMaxW-barLen))
 
 	// Icon + name

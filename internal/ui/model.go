@@ -25,10 +25,6 @@ type scanDoneMsg struct {
 	err  error
 }
 
-// progressTickMsg is sent periodically to update the scanned-bytes counter
-// displayed while scanning is in progress.
-type progressTickMsg struct{ scanned int64 }
-
 // Node is a local alias for the scanner node.
 type Node = scanner.Node
 
