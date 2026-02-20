@@ -43,6 +43,5 @@ jobs:
 
       - name: Cross-shell Compatibility (Zsh)
         run: |
-          sudo apt-get install -y zsh
-          ./aster -v
-        shell: zsh {0}
+          sudo apt-get update && sudo apt-get install -y zsh
+          zsh -c "./aster -v"
