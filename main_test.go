@@ -57,7 +57,7 @@ func TestRun(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runProgram = func(p *tea.Program) (tea.Model, error) {
+			runProgram = func(_ *tea.Program) (tea.Model, error) {
 				return nil, tt.mockRunError
 			}
 
@@ -101,7 +101,7 @@ func TestMainFunc(t *testing.T) {
 	}()
 
 	os.Args = []string{"aster", "-v"}
-	runProgram = func(p *tea.Program) (tea.Model, error) {
+	runProgram = func(_ *tea.Program) (tea.Model, error) {
 		return nil, nil
 	}
 

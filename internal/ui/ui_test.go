@@ -23,10 +23,8 @@ func TestModelNewInit(t *testing.T) {
 	// Test startScan cmd manually
 	sCmd := startScan("/invalid/path/that/does/not/exist/1234")
 	msg := sCmd()
-	if doneMsg, ok := msg.(scanDoneMsg); !ok {
+	if _, ok := msg.(scanDoneMsg); !ok {
 		t.Errorf("expected scanDoneMsg, got %T", msg)
-	} else if doneMsg.err == nil {
-		// we expect an error or at least some message
 	}
 }
 
@@ -130,7 +128,7 @@ func TestModelUpdateKeys(t *testing.T) {
 		},
 	}
 
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 
 	// down
 	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -303,13 +301,13 @@ func TestModelActions(t *testing.T) {
 	}
 
 	opened := ""
-	openPath = func(ctx context.Context, path string) error {
+	openPath = func(_ context.Context, path string) error {
 		opened = path
 		return nil
 	}
 
 	revealed := ""
-	revealPath = func(ctx context.Context, path string) error {
+	revealPath = func(_ context.Context, path string) error {
 		revealed = path
 		return nil
 	}
