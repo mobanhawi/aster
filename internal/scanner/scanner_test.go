@@ -255,3 +255,88 @@ func TestScanWithProgressChannel(t *testing.T) {
 		}
 	})
 }
+
+func TestScanSingleFile(t *testing.T) {
+	root := makeTestDir(t, map[string][]byte{
+		"file.bin": bytes(fileSizeMedium),
+	})
+
+	filePath := filepath.Join(root, "file.bin")
+	progressCh := make(chan int64, 10)
+	node, err := scanner.Scan(context.Background(), filePath, progressCh)
+	close(progressCh)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if node == nil || node.IsDir {
+		t.Fatal("expected file node, not dir")
+	}
+
+	if node.Size() != fileSizeMedium {
+		t.Errorf("Size() = %d, want %d", node.Size(), fileSizeMedium)
+	}
+
+	val := <-progressCh
+	if val != fileSizeMedium {
+		t.Errorf("progress = %d, want %d", val, fileSizeMedium)
+	}
+}
+
+func TestScanSymlink(t *testing.T) {
+	root := makeTestDir(t, map[string][]byte{
+		"real_dir/file.bin": bytes(fileSizeMedium),
+	})
+
+	targetPath := filepath.Join(root, "real_dir")
+	linkPath := filepath.Join(root, "symlink_dir")
+
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	node, err := scanner.Scan(context.Background(), root, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if node == nil {
+		t.Fatal("node is nil")
+	}
+
+	foundSymlink := false
+	for _, child := range node.Children {
+		if child.Name == "symlink_dir" {
+			foundSymlink = true
+			if child.IsDir {
+				t.Error("symlink should have IsDir=false to avoid deep copies")
+			}
+		}
+	}
+	if !foundSymlink {
+		t.Error("did not find symlink child")
+	}
+}
+
+func TestScanContextCancellationWithProgress(t *testing.T) {
+	root := makeTestDir(t, map[string][]byte{
+		"file1.bin": bytes(fileSizeMedium),
+		"file2.bin": bytes(fileSizeMedium),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel right away
+
+	progressCh := make(chan int64, 10)
+	node, err := scanner.Scan(ctx, filepath.Join(root, "file1.bin"), progressCh)
+	close(progressCh)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if node == nil {
+		t.Fatal("node is nil")
+	}
+}
