@@ -34,6 +34,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = StateBrowsing
 		m.cursor = 0
 		m.stack = nil
+		// Cache the resolved absolute path so breadcrumb() avoids calling
+		// filepath.Abs on every render frame.
+		if msg.root != nil {
+			m.absRoot = msg.root.Name
+			// Mark the root as already sorted (startScan sorted it eagerly).
+			m.markRootSorted()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -71,7 +78,7 @@ func (m Model) handleKeyConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			parent := m.currentDir()
 			removedSize := int64(0)
 			for i, c := range parent.Children {
-				if c.Path == m.confirmPath {
+				if c.FullPath() == m.confirmPath {
 					removedSize = c.Size()
 					parent.Children = append(parent.Children[:i], parent.Children[i+1:]...)
 					break
@@ -144,7 +151,7 @@ func (m Model) handleKeyBrowsingActions(key string) (tea.Model, tea.Cmd) {
 		sel := m.selected()
 		if sel != nil {
 			m.state = StateConfirmDelete
-			m.confirmPath = sel.Path
+			m.confirmPath = sel.FullPath()
 		}
 	case "g", "home":
 		m.cursor = 0
@@ -168,11 +175,13 @@ func (m *Model) handleNavRight() (tea.Model, tea.Cmd) {
 func (m *Model) handleSortToggle() {
 	if m.sort == SortBySize {
 		m.sort = SortByName
-		sortTree(m.root, SortByName)
 	} else {
 		m.sort = SortBySize
-		sortTree(m.root, SortBySize)
 	}
+	// Advance the sort generation: each Node caches the generation at which it
+	// was last sorted. A mismatch triggers a lazy re-sort on first access —
+	// O(1) here instead of an O(N) recursive flag walk across the whole tree.
+	m.sortGen++
 	m.cursor = 0
 }
 
@@ -181,7 +190,7 @@ func (m *Model) handleOpen() error {
 	if sel != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		return openPath(ctx, sel.Path)
+		return openPath(ctx, sel.FullPath())
 	}
 	return nil
 }
@@ -191,7 +200,7 @@ func (m *Model) handleReveal() error {
 	if sel != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		return revealPath(ctx, sel.Path)
+		return revealPath(ctx, sel.FullPath())
 	}
 	return nil
 }

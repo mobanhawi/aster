@@ -24,6 +24,16 @@ var (
 		colorDim,
 	}
 
+	// barStyles are pre-built styles for each bar color to avoid allocating a
+	// new lipgloss.Style on every rendered row (called once per frame per row).
+	barStyles = func() []lipgloss.Style {
+		styles := make([]lipgloss.Style, len(barColors))
+		for i, c := range barColors {
+			styles[i] = lipgloss.NewStyle().Foreground(c)
+		}
+		return styles
+	}()
+
 	// Style: header bar.
 	styleHeader = lipgloss.NewStyle().
 			Bold(true).
@@ -98,16 +108,22 @@ var (
 	// Style: info panel divider.
 	styleDivider = lipgloss.NewStyle().
 			Foreground(colorDim)
+
+	// Style: dim portion of the usage bar (cached to avoid per-frame allocs).
+	styleBarDim = lipgloss.NewStyle().Foreground(colorDim)
 )
 
-// barColor picks a color based on the item's rank in the list.
-func barColor(rank, total int) lipgloss.Color {
+// barStyle picks a pre-cached lipgloss style based on the item's rank in the
+// list. Using a pre-built style avoids allocating a new lipgloss.Style on
+// every row render, which would otherwise happen up to listHeight times per
+// frame.
+func barStyle(rank, total int) lipgloss.Style {
 	if total <= 1 {
-		return barColors[0]
+		return barStyles[0]
 	}
-	idx := (rank * (len(barColors) - 1)) / (total - 1)
-	if idx >= len(barColors) {
-		idx = len(barColors) - 1
+	idx := (rank * (len(barStyles) - 1)) / (total - 1)
+	if idx >= len(barStyles) {
+		idx = len(barStyles) - 1
 	}
-	return barColors[idx]
+	return barStyles[idx]
 }

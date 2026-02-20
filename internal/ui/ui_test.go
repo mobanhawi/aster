@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -21,14 +22,16 @@ func TestModelNewInit(t *testing.T) {
 	}
 
 	// Test startScan cmd manually
-	sCmd := startScan("/invalid/path/that/does/not/exist/1234")
+	var counter atomic.Int64
+	pCh := make(chan int64, 16)
+	sCmd := startScan("/invalid/path/that/does/not/exist/1234", pCh, &counter)
 	msg := sCmd()
 	if _, ok := msg.(scanDoneMsg); !ok {
 		t.Errorf("expected scanDoneMsg, got %T", msg)
 	}
 }
 
-func TestSortTree(t *testing.T) {
+func TestSortNode(t *testing.T) {
 	root := &Node{
 		Name:  "root",
 		IsDir: true,
@@ -40,14 +43,33 @@ func TestSortTree(t *testing.T) {
 	root.Children[0].SetSize(10)
 	root.Children[1].SetSize(20)
 
-	sortTree(root, SortBySize)
+	// Lazy sort: mark as unsorted then call sortNode (single level only)
+	// Generation 0, mode -1 (never sorted) → IsSorted returns false.
+	const gen0 = uint64(0)
+	const modeSize = int8(0) // SortBySize = 0
+	const modeName = int8(1) // SortByName = 1
+
+	sortNode(root, SortBySize)
+	root.MarkSorted(gen0, modeSize)
 	if root.Children[0].Name != "a" {
 		t.Errorf("expected 'a' to be sorted first by size")
 	}
 
-	sortTree(root, SortByName)
+	// Simulate a generation advance (as handleSortToggle does via sortGen++).
+	const gen1 = uint64(1)
+	if root.IsSorted(gen1, modeName) {
+		t.Errorf("expected node to be stale after generation advance")
+	}
+	sortNode(root, SortByName)
+	root.MarkSorted(gen1, modeName)
 	if root.Children[0].Name != "a" {
 		t.Errorf("expected 'a' to be sorted first by name")
+	}
+
+	// ResetSorted should reset the cached generation to 0 (compat shim).
+	root.ResetSorted()
+	if root.IsSorted(gen1, modeName) {
+		t.Errorf("expected root to be stale after ResetSorted")
 	}
 }
 
@@ -181,9 +203,12 @@ func TestModelUpdateConfirmDelete(t *testing.T) {
 		Name:  "root",
 		IsDir: true,
 		Children: []*Node{
-			{Name: "foo", Path: "/path/to/foo", IsDir: false},
-			{Name: "bar", Path: "/path/to/bar", IsDir: false},
+			{Name: "foo", IsDir: false},
+			{Name: "bar", IsDir: false},
 		},
+	}
+	for _, c := range root.Children {
+		c.Parent = root
 	}
 	root.Children[0].SetSize(100)
 	root.AddSize(100)
@@ -198,8 +223,8 @@ func TestModelUpdateConfirmDelete(t *testing.T) {
 	// trigger delete confirmation
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	newM := m2.(Model)
-	if newM.state != StateConfirmDelete || newM.confirmPath != "/path/to/foo" {
-		t.Errorf("expected state StateConfirmDelete on /path/to/foo")
+	if newM.state != StateConfirmDelete || newM.confirmPath != "root/foo" {
+		t.Errorf("expected state StateConfirmDelete on root/foo, got %s", newM.confirmPath)
 	}
 
 	// abort delete
@@ -250,9 +275,12 @@ func TestModelView(t *testing.T) {
 		Name:  "sys",
 		IsDir: true,
 		Children: []*Node{
-			{Name: "sub1", IsDir: true, Path: "/sys/sub1"},
-			{Name: "file1", IsDir: false, Path: "/sys/file1"},
+			{Name: "sub1", IsDir: true},
+			{Name: "file1", IsDir: false},
 		},
+	}
+	for _, c := range root.Children {
+		c.Parent = root
 	}
 	root.Children[0].SetSize(100)
 	root.Children[1].SetSize(50)
@@ -276,7 +304,7 @@ func TestModelView(t *testing.T) {
 
 	// View with confirm delete
 	m.state = StateConfirmDelete
-	m.confirmPath = "/sys/file1"
+	m.confirmPath = "sys/file1"
 	out = m.View()
 	if len(out) == 0 {
 		t.Errorf("expected View() output for confirm delete")
@@ -316,8 +344,11 @@ func TestModelActions(t *testing.T) {
 		Name:  "root",
 		IsDir: true,
 		Children: []*Node{
-			{Name: "foo", Path: "/path/to/foo", IsDir: false},
+			{Name: "foo", IsDir: false},
 		},
+	}
+	for _, c := range root.Children {
+		c.Parent = root
 	}
 	root.Children[0].SetSize(100)
 	root.AddSize(100)
@@ -329,21 +360,21 @@ func TestModelActions(t *testing.T) {
 
 	// Test 'o' (open)
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
-	if opened != "/path/to/foo" {
-		t.Errorf("expected openPath to be called with /path/to/foo")
+	if opened != "root/foo" {
+		t.Errorf("expected openPath to be called with root/foo, got %s", opened)
 	}
 
 	// Test 'r' (reveal)
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
-	if revealed != "/path/to/foo" {
-		t.Errorf("expected revealPath to be called with /path/to/foo")
+	if revealed != "root/foo" {
+		t.Errorf("expected revealPath to be called with root/foo, got %s", revealed)
 	}
 
 	// Test 'd', then 'y' (confirm delete)
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m3, _ := m2.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
-	if trashed != "/path/to/foo" {
-		t.Errorf("expected trashItem to be called with /path/to/foo")
+	if trashed != "root/foo" {
+		t.Errorf("expected trashItem to be called with root/foo, got %s", trashed)
 	}
 
 	if len(m3.(Model).root.Children) != 0 {

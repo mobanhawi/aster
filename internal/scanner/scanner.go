@@ -2,16 +2,17 @@ package scanner
 
 import (
 	"context"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 )
 
-// Scan walks the directory tree rooted at root concurrently.
-// progressCh (optional) receives byte counts as files are encountered.
-// The channel is NOT closed by Scan; the caller should close it after use.
+// Scan walks the directory tree rooted at root concurrently using a semaphore-
+// limited goroutine-per-directory model.
 func Scan(ctx context.Context, root string, progressCh chan<- int64) (*Node, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -24,122 +25,176 @@ func Scan(ctx context.Context, root string, progressCh chan<- int64) (*Node, err
 	}
 
 	rootNode := &Node{
-		Name:  filepath.Base(absRoot),
-		Path:  absRoot,
+		Name:  absRoot,
 		IsDir: info.IsDir(),
 	}
 
 	if !info.IsDir() {
 		rootNode.SetSize(info.Size())
-		if progressCh != nil {
-			select {
-			case progressCh <- info.Size():
-			case <-ctx.Done():
-			}
-		}
+		sendProgress(ctx, progressCh, info.Size())
 		return rootNode, nil
 	}
 
-	// Limit concurrent os.ReadDir calls, NOT the overall goroutine tree.
-	// Holding the semaphore only during I/O prevents the classic deadlock where
-	// goroutines hold a slot while blocking in sync.WaitGroup.Wait() for
-	// children that are also waiting for a slot.
-	maxConcurrent := runtime.NumCPU() * 2
-	if maxConcurrent < 4 {
-		maxConcurrent = 4
+	numWorkers := runtime.NumCPU() * 2
+	if numWorkers < 4 {
+		numWorkers = 4
 	}
-	sem := make(chan struct{}, maxConcurrent)
+	sem := make(chan struct{}, numWorkers)
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		scanDir(ctx, rootNode, sem, progressCh)
-	}()
-	wg.Wait()
+	var globalWg sync.WaitGroup
+	globalWg.Add(1)
+	go scanDir(ctx, rootNode, absRoot, nil, sem, progressCh, &globalWg)
+	globalWg.Wait()
 
 	return rootNode, nil
 }
 
-// scanDir recursively scans a directory. The semaphore is acquired only for
-// the os.ReadDir syscall, then immediately released before spawning children.
-// This avoids the deadlock where a goroutine holds a semaphore slot while
-// waiting for child goroutines that need the same slots.
-func scanDir(ctx context.Context, node *Node, sem chan struct{}, progressCh chan<- int64) {
-	// Acquire slot only for the directory read I/O.
-	select {
-	case sem <- struct{}{}:
-	case <-ctx.Done():
+const (
+	// readDirBatchSize controls how many entries we read from disk at once.
+	// Processing in batches keeps peak memory usage low for massive directories
+	// (e.g. 1M+ files) and improves UI responsiveness.
+	readDirBatchSize = 1024
+)
+
+// scanDir reads a single directory, processes its file children inline, and
+// spawns a new goroutine (bounded by sem) for each subdirectory child.
+func scanDir(
+	ctx context.Context,
+	node *Node,
+	currentPath string,
+	parentWg *sync.WaitGroup,
+	sem chan struct{},
+	progressCh chan<- int64,
+	globalWg *sync.WaitGroup,
+) {
+	var localChildrenWg sync.WaitGroup
+
+	defer func() {
+		localChildrenWg.Wait()
+		if node.Parent != nil {
+			node.Parent.AddSize(node.Size())
+		}
+		if parentWg != nil {
+			parentWg.Done()
+		}
+		globalWg.Done()
+	}()
+
+	if ctx.Err() != nil {
 		return
 	}
-	entries, err := os.ReadDir(node.Path)
-	<-sem // Release immediately — not held during child goroutines.
 
+	// Bypassing os.ReadDir to:
+	// 1. Avoid the mandatory alphabetical sort (we sort lazily in UI).
+	// 2. Process in chunks to cap peak memory for massive directories.
+	sem <- struct{}{}
+	// #nosec G304,G703 -- currentPath is a directory being scanned, sanitized by filepath.Abs in Scan()
+	f, err := os.Open(currentPath)
 	if err != nil {
+		<-sem
 		node.Err = err
 		return
 	}
 
-	var (
-		mu      sync.Mutex
-		childWg sync.WaitGroup
-	)
+	sep := string(os.PathSeparator)
+	dirPrefix := currentPath
+	if !strings.HasSuffix(dirPrefix, sep) {
+		dirPrefix += sep
+	}
+
+	for ctx.Err() == nil {
+		// Read a batch of entries.
+		// Using f.ReadDir instead of os.ReadDir bypasses the stdlib's sorting.
+		entries, err := f.ReadDir(readDirBatchSize)
+		if err != nil {
+			if err != io.EOF {
+				node.Err = err
+			}
+			break
+		}
+		if len(entries) == 0 {
+			break
+		}
+
+		processBatch(ctx, node, entries, dirPrefix, sem, &localChildrenWg, progressCh, globalWg)
+	}
+
+	if cerr := f.Close(); cerr != nil && node.Err == nil {
+		node.Err = cerr
+	}
+	<-sem
+}
+
+// processBatch handles logical processing for a chunk of directory entries,
+// reducing the cyclomatic complexity of scanDir.
+func processBatch(
+	ctx context.Context,
+	node *Node,
+	entries []fs.DirEntry,
+	dirPrefix string,
+	sem chan struct{},
+	localChildrenWg *sync.WaitGroup,
+	progressCh chan<- int64,
+	globalWg *sync.WaitGroup,
+) {
+	var batchFilesSize int64
+
+	// Pre-grow children slice to minimize reallocs.
+	needed := len(node.Children) + len(entries)
+	if cap(node.Children) < needed {
+		newCap := cap(node.Children) * 2
+		if newCap < needed {
+			newCap = needed
+		}
+		newChildren := make([]*Node, len(node.Children), newCap)
+		copy(newChildren, node.Children)
+		node.Children = newChildren
+	}
 
 	for _, entry := range entries {
-		if ctx.Err() != nil {
-			return
-		}
-
-		entryPath := filepath.Join(node.Path, entry.Name())
-
 		child := &Node{
-			Name:  entry.Name(),
-			Path:  entryPath,
-			IsDir: entry.IsDir(),
+			Name:   entry.Name(),
+			Parent: node,
+			IsDir:  entry.IsDir(),
 		}
 
-		// Don't follow symlinks — avoids cycles.
 		if entry.Type()&fs.ModeSymlink != 0 {
 			child.IsDir = false
-			mu.Lock()
 			node.Children = append(node.Children, child)
-			mu.Unlock()
 			continue
 		}
 
 		if entry.IsDir() {
-			mu.Lock()
 			node.Children = append(node.Children, child)
-			mu.Unlock()
-
-			childWg.Add(1)
-			go func(c *Node) {
-				defer childWg.Done()
-				scanDir(ctx, c, sem, progressCh)
-				node.AddSize(c.Size())
-			}(child)
+			localChildrenWg.Add(1)
+			globalWg.Add(1)
+			childPath := dirPrefix + entry.Name()
+			go scanDir(ctx, child, childPath, localChildrenWg, sem, progressCh, globalWg)
 		} else {
 			info, err := entry.Info()
 			if err != nil {
+				node.Children = append(node.Children, child)
 				continue
 			}
-			size := info.Size()
-			child.SetSize(size)
-			node.AddSize(size)
-
-			if progressCh != nil {
-				select {
-				case progressCh <- size:
-				case <-ctx.Done():
-					return
-				}
-			}
-
-			mu.Lock()
+			sz := info.Size()
+			child.SetSize(sz)
+			batchFilesSize += sz
 			node.Children = append(node.Children, child)
-			mu.Unlock()
 		}
 	}
 
-	childWg.Wait()
+	if batchFilesSize > 0 {
+		node.AddSize(batchFilesSize)
+		sendProgress(ctx, progressCh, batchFilesSize)
+	}
+}
+
+func sendProgress(ctx context.Context, ch chan<- int64, sz int64) {
+	if ch == nil || sz == 0 || ctx.Err() != nil {
+		return
+	}
+	select {
+	case ch <- sz:
+	default:
+	}
 }

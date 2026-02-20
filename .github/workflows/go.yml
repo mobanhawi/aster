@@ -36,6 +36,13 @@ jobs:
           go tool cover -func=coverage.out >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
+      - name: Benchmarks
+        run: |
+          echo "## Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          go test ./... -run='^$' -bench=. -benchmem -benchtime=1x 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:

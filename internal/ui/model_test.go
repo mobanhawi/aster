@@ -9,14 +9,17 @@ import (
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func nodeWithSize(name string, isDir bool, size int64, children ...*Node) *Node {
-	n := &Node{Name: name, Path: "/tmp/" + name, IsDir: isDir}
+	n := &Node{Name: name, IsDir: isDir}
 	n.SetSize(size)
 	n.Children = children
+	for _, c := range children {
+		c.Parent = n
+	}
 	return n
 }
 
 func browsingModel(root *Node) Model {
-	m := New(root.Path)
+	m := New(root.Name) // For root, Name is the full path
 	m.root = root
 	m.state = StateBrowsing
 	m.width = 120
@@ -187,7 +190,7 @@ func TestDeleteConfirmFlow(t *testing.T) {
 	t.Run("GivenConfirmDelete_WhenEscPressed_ThenReturnsToBrowsing", func(t *testing.T) {
 		m := browsingModel(root)
 		m.state = StateConfirmDelete
-		m.confirmPath = "/tmp/fileA.txt"
+		m.confirmPath = "root/fileA.txt" // FullPath of fileA under root
 
 		newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 		got := newModel.(Model)
@@ -203,7 +206,7 @@ func TestDeleteConfirmFlow(t *testing.T) {
 	t.Run("GivenConfirmDelete_WhenNPressed_ThenReturnsToBrowsing", func(t *testing.T) {
 		m := browsingModel(root)
 		m.state = StateConfirmDelete
-		m.confirmPath = "/tmp/fileA.txt"
+		m.confirmPath = "root/fileA.txt"
 
 		newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 		got := newModel.(Model)
