@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,17 +12,7 @@ import (
 )
 
 // Scan walks the directory tree rooted at root concurrently using a semaphore-
-// limited goroutine-per-directory model. A buffered semaphore caps the number
-// of goroutines simultaneously performing directory I/O (NumCPU*2, min 4),
-// preventing both goroutine explosion on very wide/deep trees and the
-// bounded-channel deadlock that occurred in the previous bounded worker-pool
-// design (where all workers could block trying to enqueue new work into the
-// same full channel they were consuming from).
-//
-// progressCh (optional) receives byte counts as files are encountered.
-// Sends are non-blocking — if the consumer is slow, progress ticks are dropped
-// rather than stalling a scanner worker. The channel is NOT closed by Scan;
-// the caller should close it after use.
+// limited goroutine-per-directory model.
 func Scan(ctx context.Context, root string, progressCh chan<- int64) (*Node, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -34,8 +25,7 @@ func Scan(ctx context.Context, root string, progressCh chan<- int64) (*Node, err
 	}
 
 	rootNode := &Node{
-		Name:  filepath.Base(absRoot),
-		Path:  absRoot,
+		Name:  absRoot,
 		IsDir: info.IsDir(),
 	}
 
@@ -45,49 +35,45 @@ func Scan(ctx context.Context, root string, progressCh chan<- int64) (*Node, err
 		return rootNode, nil
 	}
 
-	// Semaphore caps concurrent directory I/O goroutines.
 	numWorkers := runtime.NumCPU() * 2
 	if numWorkers < 4 {
 		numWorkers = 4
 	}
 	sem := make(chan struct{}, numWorkers)
 
-	// globalWg tracks every in-flight scanDir goroutine so Scan can wait for
-	// the entire tree to finish before returning.
 	var globalWg sync.WaitGroup
 	globalWg.Add(1)
-	go scanDir(ctx, rootNode, nil, nil, sem, progressCh, &globalWg)
+	go scanDir(ctx, rootNode, absRoot, nil, sem, progressCh, &globalWg)
 	globalWg.Wait()
 
 	return rootNode, nil
 }
 
+const (
+	// readDirBatchSize controls how many entries we read from disk at once.
+	// Processing in batches keeps peak memory usage low for massive directories
+	// (e.g. 1M+ files) and improves UI responsiveness.
+	readDirBatchSize = 1024
+)
+
 // scanDir reads a single directory, processes its file children inline, and
 // spawns a new goroutine (bounded by sem) for each subdirectory child.
-//
-// It acquires the semaphore only for the os.ReadDir call, then releases it
-// immediately so that child goroutines can also acquire it. This prevents the
-// deadlock where holding the semaphore while enqueuing children causes
-// starvation when the semaphore is exhausted.
-//
-// parentWg is the WaitGroup belonging to this node's *parent* — Done() is
-// called on it when this goroutine finishes so the parent can wait for all
-// its direct children before propagating its own size upward.
 func scanDir(
 	ctx context.Context,
 	node *Node,
-	parent *Node,
-	parentWg *sync.WaitGroup, // signal parent when done
+	currentPath string,
+	parentWg *sync.WaitGroup,
 	sem chan struct{},
 	progressCh chan<- int64,
 	globalWg *sync.WaitGroup,
 ) {
+	var localChildrenWg sync.WaitGroup
+
 	defer func() {
-		// Propagate our accumulated size to the parent.
-		if parent != nil {
-			parent.AddSize(node.Size())
+		localChildrenWg.Wait()
+		if node.Parent != nil {
+			node.Parent.AddSize(node.Size())
 		}
-		// Signal our parent's childrenWg (if any) that we are done.
 		if parentWg != nil {
 			parentWg.Done()
 		}
@@ -98,91 +84,99 @@ func scanDir(
 		return
 	}
 
-	// Acquire semaphore before doing directory I/O; release immediately after.
-	// Releasing before spawning children means children can also acquire the
-	// semaphore without deadlocking.
+	// Bypassing os.ReadDir to:
+	// 1. Avoid the mandatory alphabetical sort (we sort lazily in UI).
+	// 2. Process in chunks to cap peak memory for massive directories.
 	sem <- struct{}{}
-	entries, err := os.ReadDir(node.Path)
-	<-sem
-
+	f, err := os.Open(currentPath)
 	if err != nil {
+		<-sem
 		node.Err = err
 		return
 	}
+	// Note: f.Close() is called AFTER ReadDir processing.
 
-	// Pre-allocate to the exact entry count to avoid repeated slice reallocs
-	// for directories with many entries (e.g. node_modules with 50 000 files).
-	node.Children = make([]*Node, 0, len(entries))
+	sep := string(os.PathSeparator)
+	dirPrefix := currentPath
+	if !strings.HasSuffix(dirPrefix, sep) {
+		dirPrefix += sep
+	}
 
-	// childrenWg tracks our direct subdirectory children so we can wait for
-	// all their sizes to propagate before we propagate our own size upward.
-	var childrenWg sync.WaitGroup
-
-	// parentPath is used for manual path joining — avoids the allocations
-	// inside filepath.Join (separator normalisation, path.Clean, etc.) since
-	// node.Path is already clean and absolute.
-	parentPath := node.Path
-	needSep := !strings.HasSuffix(parentPath, string(os.PathSeparator))
-
-	for _, entry := range entries {
+	for {
 		if ctx.Err() != nil {
 			break
 		}
 
-		// Fast path: build child path without filepath.Join overhead.
-		var entryPath string
-		if needSep {
-			entryPath = parentPath + string(os.PathSeparator) + entry.Name()
-		} else {
-			entryPath = parentPath + entry.Name()
+		// Read a batch of entries.
+		// Using f.ReadDir instead of os.ReadDir bypasses the stdlib's sorting.
+		entries, err := f.ReadDir(readDirBatchSize)
+		if err != nil {
+			if err != io.EOF {
+				node.Err = err
+			}
+			break
+		}
+		if len(entries) == 0 {
+			break
 		}
 
-		child := &Node{
-			Name:  entry.Name(),
-			Path:  entryPath,
-			IsDir: entry.IsDir(),
+		var batchFilesSize int64
+		// Pre-grow children slice to minimize reallocs within this batch.
+		if cap(node.Children)-len(node.Children) < len(entries) {
+			newCap := len(node.Children) + len(entries)
+			if newCap < cap(node.Children)*2 {
+				newCap = cap(node.Children) * 2
+			}
+			newChildren := make([]*Node, len(node.Children), newCap)
+			copy(newChildren, node.Children)
+			node.Children = newChildren
 		}
 
-		// Never follow symlinks — avoids infinite cycles.
-		if entry.Type()&fs.ModeSymlink != 0 {
-			child.IsDir = false
-			node.Children = append(node.Children, child)
-			continue
-		}
+		for _, entry := range entries {
+			child := &Node{
+				Name:   entry.Name(),
+				Parent: node,
+				IsDir:  entry.IsDir(),
+			}
 
-		if entry.IsDir() {
-			node.Children = append(node.Children, child)
-			childrenWg.Add(1)
-			globalWg.Add(1)
-			go scanDir(ctx, child, node, &childrenWg, sem, progressCh, globalWg)
-		} else {
-			info, err := entry.Info()
-			if err != nil {
+			if entry.Type()&fs.ModeSymlink != 0 {
+				child.IsDir = false
 				node.Children = append(node.Children, child)
 				continue
 			}
-			size := info.Size()
-			child.SetSize(size)
-			node.AddSize(size)
-			sendProgress(ctx, progressCh, size)
-			node.Children = append(node.Children, child)
-		}
-	}
 
-	// Wait for all subdirectory sizes to be accumulated before propagating our
-	// own size upward. This ensures parent sizes are correct.
-	childrenWg.Wait()
+			if entry.IsDir() {
+				node.Children = append(node.Children, child)
+				localChildrenWg.Add(1)
+				globalWg.Add(1)
+				childPath := dirPrefix + entry.Name()
+				go scanDir(ctx, child, childPath, &localChildrenWg, sem, progressCh, globalWg)
+			} else {
+				info, err := entry.Info()
+				if err != nil {
+					node.Children = append(node.Children, child)
+					continue
+				}
+				sz := info.Size()
+				child.SetSize(sz)
+				batchFilesSize += sz
+				node.Children = append(node.Children, child)
+			}
+		}
+		// Update size and progress incrementally per batch.
+		node.AddSize(batchFilesSize)
+		sendProgress(ctx, progressCh, batchFilesSize)
+	}
+	f.Close()
+	<-sem
 }
 
-// sendProgress sends sz to progressCh without blocking. If the channel is full
-// or nil the tick is silently dropped — progress is best-effort and must never
-// stall a scanner worker.
 func sendProgress(ctx context.Context, ch chan<- int64, sz int64) {
-	if ch == nil || ctx.Err() != nil {
+	if ch == nil || sz == 0 || ctx.Err() != nil {
 		return
 	}
 	select {
 	case ch <- sz:
-	default: // consumer is slow; drop rather than block
+	default:
 	}
 }

@@ -42,7 +42,7 @@ func BenchmarkSortToggle(b *testing.B) {
 	}
 }
 
-// BenchmarkVisibleChildren measures lazy sort amortised cost.
+// BenchmarkVisibleChildren measures lazy sort amortized cost.
 func BenchmarkVisibleChildren(b *testing.B) {
 	root := nodeWithSize("root", true, 0)
 	root.Children = make([]*Node, 1_000)

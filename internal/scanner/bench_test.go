@@ -89,7 +89,7 @@ func BenchmarkScanWithProgress(b *testing.B) {
 	for range b.N {
 		ch := make(chan int64, 4096)
 		go func() {
-			for range ch { //nolint:revive
+			for range ch { //nolint:revive // bench doesn't need to process progress
 			}
 		}()
 		_, err := scanner.Scan(context.Background(), root, ch)

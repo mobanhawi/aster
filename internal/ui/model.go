@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/mobanhawi/aster/internal/scanner"
 )
@@ -23,7 +22,9 @@ const (
 )
 
 // sortModeToInt8 converts a SortMode to the int8 stored in Node.SortedMode.
-func sortModeToInt8(m SortMode) int8 { return int8(m) }
+func sortModeToInt8(m SortMode) int8 {
+	return int8(m) // #nosec G115 -- SortMode values are small iota constants (0, 1)
+}
 
 // scanDoneMsg is sent when scanning completes.
 type scanDoneMsg struct {
@@ -250,7 +251,10 @@ func (m *Model) keyHints() string {
 func (m *Model) humanSize(sz int64) string {
 	if sz != m.cachedStatusSize || m.cachedStatusHuman == "" {
 		m.cachedStatusSize = sz
-		m.cachedStatusHuman = humanize.Bytes(uint64(sz))
+		if sz < 0 {
+			sz = 0
+		}
+		m.cachedStatusHuman = humanize.Bytes(uint64(sz)) // #nosec G115 -- sz is file size, non-negative
 	}
 	return m.cachedStatusHuman
 }
@@ -263,41 +267,11 @@ func (m *Model) humanSize(sz int64) string {
 // discarded after. It is NOT a package-level cache because bar rendering
 // depends on both rank and width, which can change across frames.
 
-// renderBar returns the coloured + dim bar string for a given rank/total/pct,
-// using a caller-provided string builder to avoid intermediate allocations.
-func renderBar(rank, total, barLen, barMaxW int) string {
-	if barLen > barMaxW {
-		barLen = barMaxW
-	}
-	style := barStyle(rank, total)
-	// Build the bar with two Render calls; lipgloss escapes are cheap compared
-	// to the previous per-row NewStyle().Foreground().Render() chain.
-	return style.Render(strings.Repeat("█", barLen)) +
-		styleBarDim.Render(strings.Repeat("░", barMaxW-barLen))
-}
-
 // Sorted flag for root after init.
 func (m *Model) markRootSorted() {
 	if m.root != nil {
 		m.root.MarkSorted(m.sortGen, sortModeToInt8(m.sort))
 	}
-}
-
-// resolveAbsRoot caches the absolute path of the root so View() doesn't call
-// filepath.Abs on every frame.
-func (m *Model) resolveAbsRoot() string {
-	return m.absRoot
-}
-
-// setAbsRoot stores the resolved path (called once from scanDoneMsg handler).
-func (m *Model) setAbsRoot(p string) {
-	m.absRoot = p
-}
-
-// statusHuman formats the size label used in the status bar.
-// Exported for inlining; callers should pass m.humanSize(sz).
-func statusLabel(n int, totalHuman, sortLabel string) string {
-	return " " + itoa(n) + " items  total: " + totalHuman + "  sort: " + sortLabel
 }
 
 // itoa is a tiny allocation-free int→string for small non-negative values.
@@ -320,10 +294,3 @@ var itoaTable = func() []string {
 	}
 	return t
 }()
-
-// lipglossWidth caches the result of lipgloss.Width since it parses ANSI
-// escape codes and is therefore non-trivial.
-// We use it for the status-bar gap calculation, called once per frame.
-func lipglossWidth(s string) int {
-	return lipgloss.Width(s)
-}
