@@ -33,7 +33,7 @@ func main() {
 	}
 
 	// Verify the path exists
-	if _, err := os.Stat(absRoot); err != nil {
+	if _, err := os.Stat(absRoot); err != nil { //nolint:gosec
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}

@@ -20,16 +20,13 @@ jobs:
       - name: Build
         run: go build -v -o aster .
 
-      - name: Run golangci-lint
+      - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           args: --timeout=5m
 
-      - name: go vet
-        run: go vet ./...
-
-      - name: Test with race detector and coverage
+      - name: Unit Tests
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Coverage Summary

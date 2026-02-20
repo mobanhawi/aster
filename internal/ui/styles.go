@@ -3,7 +3,7 @@ package ui
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	// Color palette
+	// Color palette.
 	colorAccent = lipgloss.Color("#9b59b6")
 	colorTeal   = lipgloss.Color("#1abc9c")
 	colorDim    = lipgloss.Color("#444466")
@@ -14,7 +14,7 @@ var (
 	colorYellow = lipgloss.Color("#f1c40f")
 	colorGreen  = lipgloss.Color("#2ecc71")
 
-	// Bar colors by size percentile (index 0 = largest)
+	// Bar colors by size percentile (index 0 = largest).
 	barColors = []lipgloss.Color{
 		colorRed,
 		colorOrange,
@@ -24,7 +24,7 @@ var (
 		colorDim,
 	}
 
-	// Style: header bar
+	// Style: header bar.
 	styleHeader = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorWhite).

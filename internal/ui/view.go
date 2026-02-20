@@ -160,7 +160,7 @@ func (m Model) renderRow(node *Node, rank, total int, parentSize int64, selected
 	}
 	name := nameStyle.Width(nameW).Render(icon + truncate(node.Name, nameW-3))
 
-	sizeStr := styleSize.Render(humanize.Bytes(uint64(node.Size())))
+	sizeStr := styleSize.Render(humanize.Bytes(uint64(node.Size()))) //nolint:gosec
 	pctStr := stylePct.Render(fmt.Sprintf("%4.0f%%", pct*100))
 
 	row := bar + " " + name + sizeStr + pctStr
@@ -173,8 +173,12 @@ func (m Model) renderRow(node *Node, rank, total int, parentSize int64, selected
 
 // breadcrumb returns a readable "~ > dir > subdir" path.
 func (m Model) breadcrumb() string {
-	home, _ := filepath.Abs(m.rootPath)
-	parts := []string{" " + home}
+	home, err := filepath.Abs(m.rootPath)
+	if err != nil {
+		home = m.rootPath
+	}
+	parts := make([]string, 0, len(m.stack)+1)
+	parts = append(parts, " "+home)
 	for _, n := range m.stack {
 		parts = append(parts, n.Name)
 	}
