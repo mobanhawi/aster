@@ -2,10 +2,19 @@
 
 A terminal disk usage analyzer for macOS. Navigate your filesystem, identify large directories, and clean up — all from the terminal.
 
+![aster TUI](screenshot.png)
+
 ## Install
 
+### Homebrew (recommended)
+
 ```bash
-git clone https://github.com/mobanhawi/aster
+brew tap mobanhawi/aster
+brew install aster
+```
+
+### Build from source
+
 cd aster
 go build -o aster .
 ```

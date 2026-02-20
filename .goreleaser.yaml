@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: aster
+
+builds:
+  - main: .
+    binary: aster
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+homebrew_casks:
+  - name: aster
+    tap:
+      owner: mobanhawi
+      name: homebrew-aster
+      branch: main
+    commit_author:
+      name: mobanhawi
+      email: mobanhawi@users.noreply.github.com
+    homepage: https://github.com/mobanhawi/aster
+    description: Terminal disk usage analyzer for macOS
+    license: MIT
