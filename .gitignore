@@ -1,0 +1,12 @@
+# Build output
+aster
+gosh
+diskview
+
+# Go
+*.test
+*.out
+/vendor/
+
+# macOS
+.DS_Store
