@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,6 +24,10 @@ type scanDoneMsg struct {
 	root *Node
 	err  error
 }
+
+// progressTickMsg is sent periodically to update the scanned-bytes counter
+// displayed while scanning is in progress.
+type progressTickMsg struct{ scanned int64 }
 
 // Node is a local alias for the scanner node.
 type Node = scanner.Node
@@ -63,6 +68,13 @@ type Model struct {
 
 	// Confirm-delete state
 	confirmPath string
+
+	// Live scan progress (updated from progressCh via atomic).
+	scannedBytes *atomic.Int64 // pointer so Model copies share the counter
+	progressCh   chan int64
+
+	// Total disk size hint from Statfs (0 if unavailable).
+	diskTotalBytes int64
 }
 
 // New constructs a fresh model targeting the given root path.
@@ -71,39 +83,61 @@ func New(rootPath string) Model {
 	sp.Spinner = spinner.Dot
 	sp.Style = styleScanning
 
+	var scanned atomic.Int64
 	return Model{
-		rootPath: rootPath,
-		state:    StateScanning,
-		sp:       sp,
+		rootPath:       rootPath,
+		state:          StateScanning,
+		sp:             sp,
+		scannedBytes:   &scanned,
+		diskTotalBytes: diskTotal(rootPath),
 	}
 }
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
+	// Create a buffered progress channel; the scanner will send byte counts.
+	m.progressCh = make(chan int64, 4096)
 	return tea.Batch(
 		m.sp.Tick,
-		startScan(m.rootPath),
+		startScan(m.rootPath, m.progressCh, m.scannedBytes),
 	)
 }
 
-// startScan launches the concurrent scanner and delivers the result as a Cmd.
-func startScan(root string) tea.Cmd {
+// startScan launches the concurrent scanner in a goroutine that also drains
+// progressCh into scanned (atomic) so the view can display live byte counts.
+func startScan(root string, progressCh chan int64, scanned *atomic.Int64) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		// We don't use the progress channel in the model for now
-		// (the spinner suffices); pass nil.
-		node, err := scanner.Scan(ctx, root, nil)
+
+		// Drain the progress channel in a separate goroutine.
+		var drainDone = make(chan struct{})
+		go func() {
+			defer close(drainDone)
+			for b := range progressCh {
+				scanned.Add(b)
+			}
+		}()
+
+		node, err := scanner.Scan(ctx, root, progressCh)
+		close(progressCh)
+		<-drainDone // wait for all progress bytes to land
+
 		if err != nil {
 			return scanDoneMsg{err: err}
 		}
-		// Sort by size immediately after scan
-		sortTree(node, SortBySize)
+
+		// Sort only the root level eagerly; all other dirs sort lazily on
+		// first navigation. This avoids a multi-second O(N log N) pause for
+		// large trees before the UI becomes interactive.
+		sortNode(node, SortBySize)
+
 		return scanDoneMsg{root: node}
 	}
 }
 
-// sortTree recursively sorts a node's children by the given SortMode.
-func sortTree(n *Node, mode SortMode) {
+// sortNode sorts a single node's children (not recursive).
+// The Node.Sorted flag is set so visibleChildren knows it is already sorted.
+func sortNode(n *Node, mode SortMode) {
 	if n == nil {
 		return
 	}
@@ -112,11 +146,6 @@ func sortTree(n *Node, mode SortMode) {
 		n.SortBySize()
 	case SortByName:
 		n.SortByName()
-	}
-	for _, child := range n.Children {
-		if child.IsDir {
-			sortTree(child, mode)
-		}
 	}
 }
 
@@ -128,11 +157,15 @@ func (m *Model) currentDir() *Node {
 	return m.stack[len(m.stack)-1]
 }
 
-// visibleChildren returns the sortable children of the current dir.
+// visibleChildren returns the sorted children of the current dir, sorting
+// them lazily on first access so the whole tree is never sorted at once.
 func (m *Model) visibleChildren() []*Node {
 	d := m.currentDir()
 	if d == nil {
 		return nil
+	}
+	if !d.Sorted {
+		sortNode(d, m.sort)
 	}
 	return d.Children
 }

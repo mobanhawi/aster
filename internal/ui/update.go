@@ -168,10 +168,14 @@ func (m *Model) handleNavRight() (tea.Model, tea.Cmd) {
 func (m *Model) handleSortToggle() {
 	if m.sort == SortBySize {
 		m.sort = SortByName
-		sortTree(m.root, SortByName)
 	} else {
 		m.sort = SortBySize
-		sortTree(m.root, SortBySize)
+	}
+	// Mark every node as unsorted so each directory re-sorts lazily on first
+	// navigation visit. This is O(N) flag resets instead of O(N log N) sorts
+	// across the entire tree — critical for trees with millions of nodes.
+	if m.root != nil {
+		m.root.ResetSorted()
 	}
 	m.cursor = 0
 }

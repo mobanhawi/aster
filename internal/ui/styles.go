@@ -98,6 +98,9 @@ var (
 	// Style: info panel divider.
 	styleDivider = lipgloss.NewStyle().
 			Foreground(colorDim)
+
+	// Style: dim portion of the usage bar (cached to avoid per-frame allocs).
+	styleBarDim = lipgloss.NewStyle().Foreground(colorDim)
 )
 
 // barColor picks a color based on the item's rank in the list.

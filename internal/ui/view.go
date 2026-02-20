@@ -30,7 +30,24 @@ func (m Model) View() string {
 // viewScanning renders the scanning progress screen.
 func (m Model) viewScanning() string {
 	header := styleHeader.Width(m.width).Render("  aster")
-	msg := styleScanning.Render(fmt.Sprintf("\n  %s Scanning %s…\n", m.sp.View(), m.rootPath))
+
+	scanned := m.scannedBytes.Load()
+	var progressHint string
+	if m.diskTotalBytes > 0 {
+		pct := float64(scanned) / float64(m.diskTotalBytes) * 100
+		if pct > 100 {
+			pct = 100
+		}
+		progressHint = fmt.Sprintf(" (%s / %s  %.0f%%)",
+			humanize.Bytes(uint64(scanned)),
+			humanize.Bytes(uint64(m.diskTotalBytes)),
+			pct,
+		)
+	} else if scanned > 0 {
+		progressHint = fmt.Sprintf(" (%s scanned)", humanize.Bytes(uint64(scanned)))
+	}
+
+	msg := styleScanning.Render(fmt.Sprintf("\n  %s Scanning %s…%s\n", m.sp.View(), m.rootPath, progressHint))
 	hint := styleFooter.Width(m.width).Render(" Press q to quit")
 	return lipgloss.JoinVertical(lipgloss.Left, header, msg, hint)
 }
@@ -141,7 +158,7 @@ func (m Model) renderRow(node *Node, rank, total int, parentSize int64, selected
 
 	color := barColor(rank, total)
 	bar := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("█", barLen)) +
-		lipgloss.NewStyle().Foreground(colorDim).Render(strings.Repeat("░", barMaxW-barLen))
+		styleBarDim.Render(strings.Repeat("░", barMaxW-barLen))
 
 	// Icon + name
 	icon := styleFile.Render("  ")

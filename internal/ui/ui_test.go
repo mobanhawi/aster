@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -21,14 +22,16 @@ func TestModelNewInit(t *testing.T) {
 	}
 
 	// Test startScan cmd manually
-	sCmd := startScan("/invalid/path/that/does/not/exist/1234")
+	var counter atomic.Int64
+	pCh := make(chan int64, 16)
+	sCmd := startScan("/invalid/path/that/does/not/exist/1234", pCh, &counter)
 	msg := sCmd()
 	if _, ok := msg.(scanDoneMsg); !ok {
 		t.Errorf("expected scanDoneMsg, got %T", msg)
 	}
 }
 
-func TestSortTree(t *testing.T) {
+func TestSortNode(t *testing.T) {
 	root := &Node{
 		Name:  "root",
 		IsDir: true,
@@ -40,14 +43,23 @@ func TestSortTree(t *testing.T) {
 	root.Children[0].SetSize(10)
 	root.Children[1].SetSize(20)
 
-	sortTree(root, SortBySize)
+	// Lazy sort: mark as unsorted then call sortNode (single level only)
+	root.Sorted = false
+	sortNode(root, SortBySize)
 	if root.Children[0].Name != "a" {
 		t.Errorf("expected 'a' to be sorted first by size")
 	}
 
-	sortTree(root, SortByName)
+	root.Sorted = false
+	sortNode(root, SortByName)
 	if root.Children[0].Name != "a" {
 		t.Errorf("expected 'a' to be sorted first by name")
+	}
+
+	// ResetSorted should mark whole tree as unsorted
+	root.ResetSorted()
+	if root.Sorted {
+		t.Errorf("expected root.Sorted to be false after ResetSorted")
 	}
 }
 
