@@ -44,11 +44,13 @@ go build -o aster .
 | `enter` / `l` | Enter directory |
 | `backspace` / `h` | Go back |
 | `s` | Toggle sort (size / name) |
-| `o` | Open in default app |
-| `r` | Reveal in Finder |
+| `o` | Open item in default app |
+| `r` | Show item's location in Finder |
 | `d` | Move to Trash (with confirm) |
 | `g` / `G` | Jump to top / bottom |
 | `q` | Quit |
+
+*Note: `o` (Open) launches the item itself. `r` (Reveal) opens the folder containing the item and highlights it.*
 
 ## Requirements
 
