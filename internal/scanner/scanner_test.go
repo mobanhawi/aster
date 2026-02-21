@@ -340,3 +340,10 @@ func TestScanContextCancellationWithProgress(t *testing.T) {
 		t.Fatal("node is nil")
 	}
 }
+
+func TestGetPurgeableSpace(t *testing.T) {
+	space := scanner.GetPurgeableSpace("/tmp")
+	if space < 0 {
+		t.Errorf("GetPurgeableSpace() returned negative value: %d", space)
+	}
+}

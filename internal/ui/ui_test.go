@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -309,6 +310,17 @@ func TestModelView(t *testing.T) {
 	if len(out) == 0 {
 		t.Errorf("expected View() output for confirm delete")
 	}
+
+	// View with purgeable space (stack empty)
+	m.state = StateBrowsing
+	m.stack = nil // empty stack
+	m.purgeableReady = true
+	m.purgeableSpace = 1000
+	m.purgeableString = "1 kB"
+	out = m.View()
+	if !strings.Contains(out, "purgeable:") {
+		t.Errorf("expected View() output to contain purgeable info")
+	}
 }
 
 func TestModelActions(t *testing.T) {
@@ -382,5 +394,35 @@ func TestModelActions(t *testing.T) {
 	}
 	if m3.(Model).root.Size() != 0 {
 		t.Errorf("expected root size to be updated cleanly")
+	}
+}
+
+func TestFetchPurgeable(t *testing.T) {
+	cmd := fetchPurgeable("/tmp")
+	msg := cmd()
+	pMsg, ok := msg.(purgeableSpaceMsg)
+	if !ok {
+		t.Fatalf("expected purgeableSpaceMsg, got %T", msg)
+	}
+	if pMsg.space < 0 {
+		t.Errorf("expected non-negative space, got %d", pMsg.space)
+	}
+	if pMsg.str == "" {
+		t.Errorf("expected non-empty string for purgeable space")
+	}
+}
+
+func TestModelUpdatePurgeable(t *testing.T) {
+	m := Model{}
+	m2, _ := m.Update(purgeableSpaceMsg{space: 1024, str: "1 kB"})
+	newM := m2.(Model)
+	if !newM.purgeableReady {
+		t.Errorf("expected purgeableReady to be true")
+	}
+	if newM.purgeableSpace != 1024 {
+		t.Errorf("expected purgeableSpace to be 1024")
+	}
+	if newM.purgeableString != "1 kB" {
+		t.Errorf("expected purgeableString to be '1 kB'")
 	}
 }
