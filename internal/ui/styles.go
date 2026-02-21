@@ -50,7 +50,7 @@ var (
 
 	// Style: selected row highlight.
 	styleSelected = lipgloss.NewStyle().
-			Background(lipgloss.Color("#2a1a4a")).
+			Background(lipgloss.Color("#3a1f5d")).
 			Bold(true)
 
 	// Style: normal row.

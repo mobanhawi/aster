@@ -165,19 +165,24 @@ func (m Model) renderRow(node *Node, rank, total int, parentSize int64, barMaxW 
 	}
 
 	// Build bar by slicing pre-allocated strings to avoid strings.Repeat per row.
-	filledPart := barFill[:barLen]
-	dimPart := barDim[:barMaxW-barLen]
+	// Note: "█" and "░" are 3 bytes each in UTF-8.
+	filledPart := barFill[:barLen*3]
+	dimPart := barDim[:(barMaxW-barLen)*3]
 	bar := barStyle(rank, total).Render(filledPart) + styleBarDim.Render(dimPart)
 
 	// Icon + name
-	icon := styleFile.Render("  ")
+	iconStr := "  "
+	if selected {
+		iconStr = "▶ "
+	}
+	icon := styleFile.Render(iconStr)
 	nameStyle := styleRow
 	if node.IsDir {
-		icon = styleDir.Render(" ")
+		icon = styleDir.Render(iconStr)
 		nameStyle = styleDir
 	}
 	if node.Err != nil {
-		icon = styleError.Render("  ")
+		icon = styleError.Render(iconStr)
 	}
 
 	nameW := m.width - barMaxW - 18 // 18 = size(9) + pct(5) + gaps
