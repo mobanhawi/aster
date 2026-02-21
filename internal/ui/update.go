@@ -232,11 +232,11 @@ var trashItem = func(path string) error {
 // openPath opens a file or directory with the default macOS app.
 var openPath = func(ctx context.Context, path string) error {
 	// #nosec G204 -- The application needs to open dynamic files
-	return exec.CommandContext(ctx, cmdOpen, filepath.Clean(path)).Start()
+	return exec.CommandContext(ctx, cmdOpen, filepath.Clean(path)).Run()
 }
 
 // revealPath reveals an item in Finder.
 var revealPath = func(ctx context.Context, path string) error {
 	// #nosec G204 -- The application needs to open dynamic files
-	return exec.CommandContext(ctx, cmdOpen, "-R", filepath.Clean(path)).Start()
+	return exec.CommandContext(ctx, cmdOpen, "-R", filepath.Clean(path)).Run()
 }
