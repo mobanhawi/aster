@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	humanize "github.com/dustin/go-humanize"
@@ -123,8 +122,11 @@ func (m Model) viewBrowse() string {
 	// Use caches: humanSize avoids re-running humanize on every frame;
 	// itoa avoids fmt.Sprintf for item count.
 	statusLeft := " " + itoa(n) + " items  total: " + m.humanSize(totalSize) + "  sort: " + sortLabel
+	if len(m.stack) == 0 && m.purgeableReady && m.purgeableSpace > 0 {
+		statusLeft += "  purgeable: " + stylePurgeable.Render(m.purgeableString)
+	}
 	statusRight := "scroll: " + scrollIndicator(m.cursor, n) + " "
-	gap := m.width - utf8.RuneCountInString(statusLeft) - utf8.RuneCountInString(statusRight)
+	gap := m.width - lipgloss.Width(statusLeft) - lipgloss.Width(statusRight)
 	if gap < 0 {
 		gap = 0
 	}

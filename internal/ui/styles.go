@@ -13,6 +13,7 @@ var (
 	colorOrange = lipgloss.Color("#e67e22")
 	colorYellow = lipgloss.Color("#f1c40f")
 	colorGreen  = lipgloss.Color("#2ecc71")
+	colorPink   = lipgloss.Color("#ff79c6")
 
 	// Bar colors by size percentile (index 0 = largest).
 	barColors = []lipgloss.Color{
@@ -108,6 +109,11 @@ var (
 	// Style: info panel divider.
 	styleDivider = lipgloss.NewStyle().
 			Foreground(colorDim)
+
+	// Style: purgeable highlights.
+	stylePurgeable = lipgloss.NewStyle().
+			Foreground(colorPink).
+			Bold(true)
 
 	// Style: dim portion of the usage bar (cached to avoid per-frame allocs).
 	styleBarDim = lipgloss.NewStyle().Foreground(colorDim)

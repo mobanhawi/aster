@@ -81,6 +81,11 @@ type Model struct {
 	scannedBytes *atomic.Int64 // pointer so Model copies share the counter
 	progressCh   chan int64
 
+	// Purgeable space state
+	purgeableSpace  int64
+	purgeableReady  bool
+	purgeableString string
+
 	// Render caches — recomputed only when their inputs change.
 	cachedDivider      string // "─" × width
 	cachedDividerWidth int
@@ -115,7 +120,28 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.sp.Tick,
 		startScan(m.rootPath, m.progressCh, m.scannedBytes),
+		fetchPurgeable(m.rootPath),
 	)
+}
+
+// purgeableSpaceMsg is sent when the background purgeable space fetch completes.
+type purgeableSpaceMsg struct {
+	space int64
+	str   string
+}
+
+// fetchPurgeable computes the volume's purgeable space asynchronously.
+func fetchPurgeable(path string) tea.Cmd {
+	return func() tea.Msg {
+		space := scanner.GetPurgeableSpace(path)
+		if space < 0 {
+			space = 0
+		}
+		return purgeableSpaceMsg{
+			space: space,
+			str:   humanize.Bytes(uint64(space)),
+		}
+	}
 }
 
 // startScan launches the concurrent scanner in a goroutine that also drains

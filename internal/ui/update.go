@@ -43,6 +43,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case purgeableSpaceMsg:
+		m.purgeableSpace = msg.space
+		m.purgeableString = msg.str
+		m.purgeableReady = true
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
