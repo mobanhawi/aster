@@ -33,6 +33,16 @@ func TestRun(t *testing.T) {
 			expectedCode: 0,
 		},
 		{
+			name:         "help flag -h",
+			args:         []string{"aster", "-h"},
+			expectedCode: 0,
+		},
+		{
+			name:         "help flag --help",
+			args:         []string{"aster", "--help"},
+			expectedCode: 0,
+		},
+		{
 			name:         "no args",
 			args:         []string{"aster"},
 			expectedCode: 1,

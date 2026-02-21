@@ -27,6 +27,12 @@ func run(args []string) int {
 		return 0
 	}
 
+	if len(args) >= 2 && (args[1] == "-h" || args[1] == "--help") {
+		fmt.Println("usage: aster <path>")
+		fmt.Println("       aster ~/Downloads")
+		return 0
+	}
+
 	if len(args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: aster <path>")
 		fmt.Fprintln(os.Stderr, "       aster ~/Downloads")
