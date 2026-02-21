@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Scan walks the directory tree rooted at root concurrently using a semaphore-
@@ -35,9 +36,9 @@ func Scan(ctx context.Context, root string, progressCh chan<- int64) (*Node, err
 		return rootNode, nil
 	}
 
-	numWorkers := runtime.NumCPU() * 2
-	if numWorkers < 4 {
-		numWorkers = 4
+	numWorkers := runtime.NumCPU() * 32
+	if numWorkers < 256 {
+		numWorkers = 256
 	}
 	sem := make(chan struct{}, numWorkers)
 
@@ -137,8 +138,6 @@ func processBatch(
 	progressCh chan<- int64,
 	globalWg *sync.WaitGroup,
 ) {
-	var batchFilesSize int64
-
 	// Pre-grow children slice to minimize reallocs.
 	needed := len(node.Children) + len(entries)
 	if cap(node.Children) < needed {
@@ -151,38 +150,76 @@ func processBatch(
 		node.Children = newChildren
 	}
 
+	startChildIdx := len(node.Children)
+
+	// Append all children to node first
 	for _, entry := range entries {
 		child := &Node{
 			Name:   entry.Name(),
 			Parent: node,
 			IsDir:  entry.IsDir(),
 		}
-
 		if entry.Type()&fs.ModeSymlink != 0 {
 			child.IsDir = false
-			node.Children = append(node.Children, child)
-			continue
 		}
-
-		if entry.IsDir() {
-			node.Children = append(node.Children, child)
-			localChildrenWg.Add(1)
-			globalWg.Add(1)
-			childPath := dirPrefix + entry.Name()
-			go scanDir(ctx, child, childPath, localChildrenWg, sem, progressCh, globalWg)
-		} else {
-			info, err := entry.Info()
-			if err != nil {
-				node.Children = append(node.Children, child)
-				continue
-			}
-			sz := info.Size()
-			child.SetSize(sz)
-			batchFilesSize += sz
-			node.Children = append(node.Children, child)
-		}
+		node.Children = append(node.Children, child)
 	}
 
+	var wg sync.WaitGroup
+	var totalSize atomic.Int64
+
+	numChunks := 8
+	if len(entries) < 32 {
+		numChunks = 1
+	}
+
+	chunkSize := (len(entries) + numChunks - 1) / numChunks
+
+	for i := 0; i < numChunks; i++ {
+		start := i * chunkSize
+		if start >= len(entries) {
+			break
+		}
+		end := start + chunkSize
+		if end > len(entries) {
+			end = len(entries)
+		}
+
+		wg.Add(1)
+		go func(s, e int) {
+			defer wg.Done()
+			var localSize int64
+
+			for j := s; j < e; j++ {
+				entry := entries[j]
+				child := node.Children[startChildIdx+j]
+
+				if entry.Type()&fs.ModeSymlink != 0 {
+					continue
+				}
+
+				if entry.IsDir() {
+					localChildrenWg.Add(1)
+					globalWg.Add(1)
+					childPath := dirPrefix + entry.Name()
+					go scanDir(ctx, child, childPath, localChildrenWg, sem, progressCh, globalWg)
+				} else {
+					info, err := entry.Info()
+					if err == nil {
+						sz := info.Size()
+						child.SetSize(sz)
+						localSize += sz
+					}
+				}
+			}
+			if localSize > 0 {
+				totalSize.Add(localSize)
+			}
+		}(start, end)
+	}
+	wg.Wait()
+
+	batchFilesSize := totalSize.Load()
 	if batchFilesSize > 0 {
 		node.AddSize(batchFilesSize)
 		sendProgress(ctx, progressCh, batchFilesSize)
